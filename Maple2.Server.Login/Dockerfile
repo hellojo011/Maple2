@@ -15,10 +15,10 @@ COPY . .
 WORKDIR "/src/Maple2.Server.Login"
 
 FROM build AS publish
-RUN dotnet publish "Maple2.Server.Login.csproj" -c Debug
+RUN dotnet publish "Maple2.Server.Login.csproj" -c Release
 
 FROM base AS final
 WORKDIR /app
-COPY --from=publish /src/Maple2.Server.Login/bin/Debug/net8.0/publish .
+COPY --from=publish /src/Maple2.Server.Login/bin/Release/net8.0/publish .
 
 ENTRYPOINT ["dotnet", "Maple2.Server.Login.dll"]

@@ -279,12 +279,30 @@ public sealed class AgentNavigation {
         return FindRandomPointAround(point, maxDistance, DotRecastHelper.FromNavMeshSpace(agent.npos));
     }
 
-    public bool PathTo(Vector3 goal) {
+    /// <summary>
+    /// How far up or down a path may reach for its goal: no further than the agent could climb.
+    /// Snapping a goal to the navmesh searches 2.7 blocks vertically, so without this a monster
+    /// grabs the ledge a player jumped onto and walks up terrain it has no way onto. A slope
+    /// still works, because the monster gains height as it follows and the gap stays small.
+    /// </summary>
+    private static readonly float MaxPathHeightDifference = DotRecastHelper.NavMeshBuildSettings.agentMaxClimb;
+
+    /// <param name="limitHeight">
+    /// Only set when chasing a target. Scripted movement - patrol routes, trigger driven walks -
+    /// is placed by a designer and has to be honoured even when it climbs, otherwise cutscenes
+    /// that walk an npc up onto a wall silently do nothing.
+    /// </param>
+    public bool PathTo(Vector3 goal, bool limitHeight = false) {
         if (!field.FindNearestPoly(agent.npos, out _, out _)) {
             return false;
         }
 
         if (!field.FindNearestPoly(goal, out _, out RcVec3f end)) {
+            return false;
+        }
+
+        // Navmesh space is Y up.
+        if (limitHeight && Math.Abs(end.Y - agent.npos.Y) > MaxPathHeightDifference) {
             return false;
         }
 

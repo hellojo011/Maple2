@@ -1,4 +1,5 @@
-﻿using Maple2.Model.Enum;
+﻿using Maple2.Database.Storage;
+using Maple2.Model.Enum;
 using Maple2.Model.Error;
 using Maple2.Model.Game;
 using Maple2.Model.Metadata;
@@ -119,7 +120,7 @@ public sealed class NpcScriptManager {
         if (Npc == null) {
             return;
         }
-        ScriptState? scriptState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Script, metadata, Npc.Value.Id);
+        ScriptState? scriptState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Script, metadata, Npc);
         if (scriptState == null) {
             return;
         }
@@ -198,7 +199,7 @@ public sealed class NpcScriptManager {
                     continue;
                 }
 
-                if (scriptConditionMetadata.ConditionCheck(session)) {
+                if (scriptConditionMetadata.ConditionCheck(session, Npc)) {
                     goToScripts.Add(goToScript);
                 }
             }
@@ -218,7 +219,7 @@ public sealed class NpcScriptManager {
                     continue;
                 }
 
-                if (scriptConditionMetadata.ConditionCheck(session)) {
+                if (scriptConditionMetadata.ConditionCheck(session, Npc)) {
                     goToFailScripts.Add(goToFailScript);
                 }
             }
@@ -372,6 +373,7 @@ public sealed class NpcScriptManager {
 
         if (!string.IsNullOrEmpty(scriptFunction.UiName)) {
             session.Send(NpcTalkPacket.OpenDialog(scriptFunction.UiName, scriptFunction.UiArg));
+            SendMaidCraftQueue(scriptFunction.UiName);
         }
 
         if (!string.IsNullOrEmpty(scriptFunction.MoveMapMovie)) {
@@ -379,7 +381,7 @@ public sealed class NpcScriptManager {
         }
 
         if (scriptFunction.PortalId > 0 && session.Field.TryGetPortal(scriptFunction.PortalId, out FieldPortal? dstPortal)) {
-            session.Send(PortalPacket.MoveByPortal(session.Player, dstPortal));
+            session.SendMoveByPortal(PortalPacket.MoveByPortal(session.Player, dstPortal));
         }
 
         if (scriptFunction.CollectItems.Count > 0) {
@@ -422,6 +424,112 @@ public sealed class NpcScriptManager {
                 ? FieldEnterPacket.Request(session.Player)
                 : FieldEnterPacket.Error(MigrationError.s_move_err_default));
         }
+
+        ApplyMaidScriptFunction(scriptFunction);
+    }
+
+    /// <summary>
+    /// The craft window draws from the queue the client was last sent, and it forgets that when
+    /// it closes. Hand the maid's queue over as the window opens, or a craft already running
+    /// shows nothing and the player is told the maid is busy when they try to order again.
+    /// </summary>
+    private void SendMaidCraftQueue(string uiName) {
+        if (!string.Equals(uiName, "OpenManufactureDialog", StringComparison.OrdinalIgnoreCase)) {
+            return;
+        }
+
+        if (Npc?.Maid?.Craft is not MaidCraftItem craft) {
+            session.Send(MaidPacket.LoadCraft([]));
+            return;
+        }
+
+        // Remaining was only ever set when the craft was ordered.
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        craft.Remaining = (int) Math.Max(0, craft.StartTime + craft.LeadTime - now);
+
+        session.Send(MaidPacket.LoadCraft([craft]));
+    }
+
+    /// <summary>
+    /// Maid dialogue moves the maid's closeness and mood; each line carries how much through
+    /// its script function. Lines the maid dislikes carry a negative mood change.
+    /// </summary>
+    private void ApplyMaidScriptFunction(ScriptFunctionMetadata scriptFunction) {
+        if (Npc?.Maid is not Maid maid) {
+            return;
+        }
+
+        if (scriptFunction.MaidClosenessIncrease == 0 && scriptFunction.MaidMoodIncrease == 0 && !scriptFunction.MaidPay) {
+            return;
+        }
+
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        // Salary is charged first: a line that cannot be paid for should not hand out the
+        // closeness and mood that come with paying.
+        if (scriptFunction.MaidPay && !PayMaidSalary(maid, now)) {
+            return;
+        }
+
+        MaidUtil.ApplyMoodDecay(session, maid, now);
+        MaidUtil.AddCloseness(session, maid, scriptFunction.MaidClosenessIncrease, now);
+        MaidUtil.AddMood(maid, scriptFunction.MaidMoodIncrease, now);
+        MaidUtil.Refresh(session, maid);
+
+        logger.Debug("[Maid] script {ScriptId} closeness {Closeness:+#;-#;0} mood {Mood:+#;-#;0} -> grade {Level} exp {Exp} mood {MoodValue}",
+            scriptFunction.ScriptId, scriptFunction.MaidClosenessIncrease, scriptFunction.MaidMoodIncrease,
+            maid.ClosenessLevel, maid.ClosenessExp, maid.Mood);
+    }
+
+    /// <summary>
+    /// Pays the maid's salary. MaidSalaryTable prices it in merets or mesos, and a payment
+    /// restarts the MaidReadyToPay countdown the dialogue branches on.
+    /// </summary>
+    private bool PayMaidSalary(Maid maid, long now) {
+        if (!session.TableMetadata.MaidSalaryTable.Entries.TryGetValue(maid.MaidId, out MaidSalaryTable.Entry? salary) || salary.Amount <= 0) {
+            logger.Warning("No salary for maid {MaidId}", maid.MaidId);
+            return false;
+        }
+
+        switch ((MaidSalaryType) salary.SalaryType) {
+            case MaidSalaryType.Meret:
+                if (session.Currency.Meret < salary.Amount) {
+                    logger.Debug("Maid {MaidId} salary needs {Amount} merets", maid.MaidId, salary.Amount);
+                    return false;
+                }
+
+                session.Currency.Meret -= salary.Amount;
+                break;
+            default:
+                if (session.Currency.Meso < salary.Amount) {
+                    logger.Debug("Maid {MaidId} salary needs {Amount} mesos", maid.MaidId, salary.Amount);
+                    return false;
+                }
+
+                session.Currency.Meso -= salary.Amount;
+                break;
+        }
+
+        // Paying renews the contract for another employment period. Script 8010 pays an
+        // already expired maid, so the new period starts at the payment rather than at an
+        // expiry date that has gone by. The period lives on the contract item, which is both
+        // what the housing tool shows and what the maid is reloaded from, so it moves there.
+        long employment = session.ServerTableMetadata.ConstantsTable.PeriodOfMaidEmployment * 24L * 60 * 60;
+        maid.ExpiryTime = Math.Max(now, maid.ExpiryTime) + employment;
+        maid.PayTime = now;
+
+        Item? contract = maid.ContractItemUid > 0 ? session.Item.Furnishing.GetCube(maid.ContractItemUid) : null;
+        if (contract is null) {
+            logger.Warning("Maid {MaidId} has no contract item to renew", maid.MaidId);
+        } else {
+            contract.ExpiryTime = maid.ExpiryTime;
+            using GameStorage.Request db = session.GameStorage.Context();
+            db.SaveItems(session.AccountId, contract);
+        }
+
+        logger.Information("[Maid] paid {Amount} ({SalaryType}) to maid {MaidId}, contract now ends {Expiry}",
+            salary.Amount, (MaidSalaryType) salary.SalaryType, maid.MaidId, DateTimeOffset.FromUnixTimeSeconds(maid.ExpiryTime).LocalDateTime);
+
+        return true;
     }
 
     #region EnchantTalk

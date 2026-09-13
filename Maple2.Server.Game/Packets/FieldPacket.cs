@@ -159,7 +159,7 @@ public static class FieldPacket {
             pWriter.WriteClass<Buff>(buff);
         }
 
-        pWriter.WriteLong(); // uid for PetNpc
+        pWriter.WriteLong(npc.OwnerItemUid); // uid of the owning item (pet, maid contract, ...)
         pWriter.WriteByte();
         pWriter.WriteInt(npc.Value.Metadata.Basic.Level);
         pWriter.WriteInt();

@@ -20,8 +20,8 @@ public static class TimeSyncPacket {
         pWriter.Write<Command>(Command.Response);
         pWriter.WriteInt(Environment.TickCount);
         pWriter.WriteLong(time.ToUnixTimeSeconds()); // CMainSystem[28], CMainSystem[30]
-        pWriter.WriteInt(time.Offset.Seconds);
-        pWriter.WriteByte(/*Timezone*/); // 0-24 Hours
+        pWriter.WriteInt((int) time.Offset.Seconds);
+        pWriter.WriteByte((byte) time.Offset.Hours); // 0-24 Hours
         pWriter.WriteInt(key);
 
         return pWriter;
@@ -32,8 +32,8 @@ public static class TimeSyncPacket {
         pWriter.Write<Command>(Command.Reset);
         pWriter.WriteInt(Environment.TickCount);
         pWriter.WriteLong(time.ToUnixTimeSeconds()); // CMainSystem[28], CMainSystem[30]
-        pWriter.WriteInt(time.Offset.Seconds);
-        pWriter.WriteByte(/*Timezone*/); // 0-24 Hours
+        pWriter.WriteInt((int) time.Offset.Seconds);
+        pWriter.WriteByte((byte) time.Offset.Hours); // 0-24 Hours
 
         return pWriter;
     }

@@ -162,7 +162,7 @@ public class GotoCommand : GameCommand {
             }
 
             if (warpResponse.RoomId == session.Field.RoomId && playerInfo.MapId == session.Player.Value.Character.MapId) {
-                session.Send(PortalPacket.MoveByPortal(session.Player, new Vector3(warpResponse.X, warpResponse.Y, warpResponse.Z + VERTICAL_SPAWN_OFFSET), session.Player.Rotation));
+                session.SendMoveByPortal(PortalPacket.MoveByPortal(session.Player, new Vector3(warpResponse.X, warpResponse.Y, warpResponse.Z + VERTICAL_SPAWN_OFFSET), session.Player.Rotation));
                 return;
             }
 

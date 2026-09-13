@@ -38,6 +38,7 @@ public record ItemMetadataProperty(
     int Collection,
     int GearScore,
     int PetId,
+    int MaidId,
     int Ride,
     int TradableCount,
     int TradableCountDeduction,

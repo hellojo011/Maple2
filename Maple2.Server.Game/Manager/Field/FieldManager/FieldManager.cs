@@ -51,6 +51,7 @@ public partial class FieldManager : IField {
     public FunctionCubeMetadataStorage FunctionCubeMetadata { get; init; } = null!;
     public ServerTableMetadataStorage ServerTableMetadata { get; init; } = null!;
     public RideMetadataStorage RideMetadata { get; init; } = null!;
+    public AchievementMetadataStorage AchievementMetadata { get; init; } = null!;
     public ItemStatsCalculator ItemStatsCalc { get; init; } = null!;
     public TriggerCache TriggerCache { get; init; } = null!;
     public Factory FieldFactory { get; init; } = null!;
@@ -171,6 +172,8 @@ public partial class FieldManager : IField {
         foreach ((Guid guid, InteractObject interact) in Entities.Interacts) {
             AddInteract(guid.ToString("N"), interact);
         }
+
+        SpawnFieldChests();
 
         foreach (SpawnPointNPC spawnPointNpc in Entities.NpcSpawns) {
             AddSpawnPointNpc(spawnPointNpc);
@@ -349,6 +352,7 @@ public partial class FieldManager : IField {
         foreach (FieldInteract interact in fieldInteracts.Values) interact.Update(FieldTick);
         foreach (FieldFunctionInteract interact in fieldFunctionInteracts.Values) interact.Update(FieldTick);
         foreach (FieldInteract interact in fieldAdBalloons.Values) interact.Update(FieldTick);
+        foreach (FieldInteract chest in fieldChests.Values) chest.Update(FieldTick);
         foreach (FieldItem item in fieldItems.Values) item.Update(FieldTick);
         foreach (FieldMobSpawn mobSpawn in fieldMobSpawns.Values) mobSpawn.Update(FieldTick);
         foreach (FieldSpawnPointNpc spawnPointNpc in fieldSpawnPointNpcs.Values) spawnPointNpc.Update(FieldTick);
@@ -394,6 +398,11 @@ public partial class FieldManager : IField {
         }
 
         DtStatus status = Navigation.Crowd.GetNavMeshQuery().FindNearestPoly(point, new RcVec3f(2, 4, 2), Navigation.Crowd.GetFilter(0), out nearestRef, out position, out _);
+        // A miss still reports success, it just hands back a null poly reference.
+        if (nearestRef == 0) {
+            return false;
+        }
+
         if (status.Failed()) {
             logger.Warning("Failed to find nearest poly from position {Source} in field {MapId}", point, MapId);
             return false;
@@ -554,7 +563,7 @@ public partial class FieldManager : IField {
                             return false;
                         }
 
-                        session.Send(PortalPacket.MoveByPortal(session.Player, destinationCube.Position, default));
+                        session.SendMoveByPortal(PortalPacket.MoveByPortal(session.Player, destinationCube.Position, default));
                         return true;
                     case CubePortalDestination.SelectedMap:
                         session.Migrate(srcPortal.TargetMapId);
@@ -609,7 +618,7 @@ public partial class FieldManager : IField {
 
                     position += forward * offset;
                 }
-                session.Send(PortalPacket.MoveByPortal(session.Player, position, rotation));
+                session.SendMoveByPortal(PortalPacket.MoveByPortal(session.Player, position, rotation));
             }
 
             return true;

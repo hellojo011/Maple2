@@ -17,10 +17,10 @@ COPY . .
 WORKDIR "/src/Maple2.Server.Web"
 
 FROM build AS publish
-RUN dotnet publish "Maple2.Server.Web.csproj" -c Debug
+RUN dotnet publish "Maple2.Server.Web.csproj" -c Release
 
 FROM base AS final
 WORKDIR /app
-COPY --from=publish /src/Maple2.Server.Web/bin/Debug/net8.0/publish .
+COPY --from=publish /src/Maple2.Server.Web/bin/Release/net8.0/publish .
 
 ENTRYPOINT ["dotnet", "Maple2.Server.Web.dll"]

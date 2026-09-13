@@ -483,9 +483,12 @@ public class GuildHandler : PacketHandler<GameSession> {
             return;
         }
 
-        // Check that player has not already checked in today.
-        DateTimeOffset today = DateTimeOffset.UtcNow.Date;
-        if (self.CheckinTime >= today.ToUnixTimeSeconds()) {
+        // Check that player has not already checked in today. The rest of the server rolls the
+        // day over at local midnight - WorldServer schedules the daily reset off DateTime.Now -
+        // so this has to use the same boundary, or check-in frees up hours after everything
+        // else does.
+        long lastMidnight = new DateTimeOffset(DateTime.Today).ToUnixTimeSeconds();
+        if (self.CheckinTime >= lastMidnight) {
             return;
         }
 

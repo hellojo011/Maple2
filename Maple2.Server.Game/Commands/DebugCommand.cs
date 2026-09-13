@@ -10,6 +10,7 @@ using System.Numerics;
 using Maple2.Model.Common;
 using Maple2.Model.Enum;
 using Maple2.Model.Game;
+using Maple2.Server.Game.Model;
 
 namespace Maple2.Server.Game.Commands;
 
@@ -27,6 +28,48 @@ public class DebugCommand : GameCommand {
         AddCommand(new PrintInventoryCommand(session));
         AddCommand(new ResetHomeCommand(session, mapMetadataStorage));
         AddCommand(new ReloadPlotsCommand(session));
+        AddCommand(new DebugMobsCommand(session));
+    }
+
+    private class DebugMobsCommand : Command {
+        private readonly GameSession session;
+
+        public DebugMobsCommand(GameSession session) : base("mobs", "Lists living mobs in the field grouped by spawn point.") {
+            this.session = session;
+            this.SetHandler<InvocationContext>(Handle);
+        }
+
+        private void Handle(InvocationContext ctx) {
+            if (session.Field is null) {
+                ctx.Console.Error.WriteLine("No field loaded.");
+                return;
+            }
+
+            Vector3 origin = session.Player.Position;
+            var groups = session.Field.Mobs.Values
+                .Where(mob => !mob.IsDead)
+                .GroupBy(mob => mob.SpawnPointId)
+                .OrderBy(group => group.Key)
+                .ToList();
+
+            if (groups.Count == 0) {
+                ctx.Console.Out.WriteLine("No living mobs.");
+                return;
+            }
+
+            ctx.Console.Out.WriteLine($"Map {session.Field.MapId} - {session.Field.Mobs.Count} mobs, {session.Field.Npcs.Count} npcs");
+            foreach (IGrouping<int, FieldNpc> group in groups) {
+                FieldNpc sample = group.First();
+                float distance = Vector3.Distance(origin, sample.Position);
+                int targeting = group.Count(mob => mob.BattleState.TargetId != 0);
+                string node = sample.BattleState.TargetNode is { } targetNode
+                    ? $"{targetNode.Type} {targetNode.From}-{targetNode.To}"
+                    : "none";
+                ctx.Console.Out.WriteLine(
+                    $"spawn {group.Key,5}: {group.Count(),3} alive, npc {sample.Value.Metadata.Id}, " +
+                    $"pos {sample.Position}, {distance:F0} away, {targeting} with a target, node {node}, state {sample.MovementState.State}");
+            }
+        }
     }
 
     private class ReloadCommandsCommand : Command {

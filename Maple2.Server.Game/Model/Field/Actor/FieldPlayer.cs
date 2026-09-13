@@ -247,10 +247,6 @@ public class FieldPlayer : Actor<Player> {
     }
 
     public void OnStateSync(StateSync stateSync) {
-        if (Position != stateSync.Position) {
-            Flag |= PlayerObjectFlag.Position;
-        }
-
         float syncDistance = Vector3.Distance(Position, stateSync.Position); // distance between old player position and new state sync position
         long syncTick = Field.FieldTick - StateSyncTrackingTick; // time elapsed since last state sync
         StateSyncTrackingTick = Field.FieldTick;
@@ -587,7 +583,7 @@ public class FieldPlayer : Actor<Player> {
             return;
         }
 
-        Session.Send(PortalPacket.MoveByPortal(this, position, rotation));
+        Session.SendMoveByPortal(PortalPacket.MoveByPortal(this, position, rotation));
     }
 
     public void MoveToPortal(FieldPortal portal) {
@@ -595,7 +591,9 @@ public class FieldPlayer : Actor<Player> {
             return;
         }
 
-        Session.Send(PortalPacket.MoveByPortal(this, portal.Position, portal.Rotation));
+        // A move through a portal is flagged, unlike MoveToPosition - the client cuts the camera
+        // to the destination instead of panning to it.
+        Session.SendMoveByPortal(PortalPacket.MoveByPortal(this, portal.Position, portal.Rotation, isPortal: true));
     }
 
     public void FallDamage(float distance) {

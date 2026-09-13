@@ -236,7 +236,12 @@ public class FurnishingManager {
         const int amount = 1;
 
         lock (session.Item) {
-            Item? stored = storage.FirstOrDefault(existing => existing.Id == item.Id && existing.Template?.Url == template?.Url);
+            // Only stack onto a slot that has room. Items with SlotMax 1 (maid contracts,
+            // for one) never stack, so an identical item already in storage must not stop
+            // this one from being stored in a slot of its own.
+            Item? stored = storage.FirstOrDefault(existing => existing.Id == item.Id
+                                                             && existing.Template?.Url == template?.Url
+                                                             && existing.Amount + amount <= item.Metadata.Property.SlotMax);
             if (stored == null) {
                 if (storage.OpenSlots <= 0) {
                     logger.Error("Furnishing storage is full, cannot add item: {ItemId}", item.Id);
@@ -256,10 +261,6 @@ public class FurnishingManager {
 
                 session.Send(FurnishingStoragePacket.Add(newItem));
                 return newItem.Uid;
-            }
-
-            if (stored.Amount + amount > item.Metadata.Property.SlotMax) {
-                return 0;
             }
 
             int previousAmount = stored.Amount;

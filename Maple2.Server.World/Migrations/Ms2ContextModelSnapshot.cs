@@ -997,6 +997,61 @@ namespace Maple2.Server.World.Migrations
                     b.ToTable("item-storage", (string)null);
                 });
 
+            modelBuilder.Entity("Maple2.Database.Model.Maid", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("AccountId")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("ClosenessExp")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ClosenessLevel")
+                        .HasColumnType("int");
+
+                    b.Property<long>("ClosenessTime")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("CraftLeadTime")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CraftRecipeId")
+                        .HasColumnType("int");
+
+                    b.Property<long>("CraftStartTime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("CubeUid")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ExpiryTime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("HireTime")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("MaidId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Mood")
+                        .HasColumnType("int");
+
+                    b.Property<long>("MoodTime")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("PayTime")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountId", "MaidId");
+
+                    b.ToTable("maid", (string)null);
+                });
+
             modelBuilder.Entity("Maple2.Database.Model.Mail", b =>
                 {
                     b.Property<long>("ReceiverId")
@@ -1322,7 +1377,6 @@ namespace Maple2.Server.World.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<string>("Item")
-                        .IsRequired()
                         .HasColumnType("json");
 
                     b.Property<int>("StockPurchased")

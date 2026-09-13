@@ -202,6 +202,8 @@ public class BattleState {
             target = targetPlayer;
         } else if (actor.Field.Npcs.TryGetValue(TargetId, out FieldNpc? targetNpc)) {
             target = targetNpc;
+        } else if (actor.Field.Mobs.TryGetValue(TargetId, out FieldNpc? targetMob)) {
+            target = targetMob;
         }
 
 
@@ -209,7 +211,20 @@ public class BattleState {
             return false;
         }
 
-        return ShouldTargetActor(target, actor.Value.Metadata.Distance.LastSightRadius * actor.Value.Metadata.Distance.LastSightRadius, actor.Value.Metadata.Distance.SightHeightUp, actor.Value.Metadata.Distance.SightHeightDown);
+        float radiusSquared = actor.Value.Metadata.Distance.LastSightRadius * actor.Value.Metadata.Distance.LastSightRadius;
+
+        // A range-type target node renews which enemy to pick; its range must not throw away the one the npc
+        // is already chasing. On the reference server the Battle03 witches in 52000120_qd (AI_DevilWitchRed_Quest,
+        // "rand 10-1300" set 1ms into battle) still walked ~2500 units in to the vigilantes, and AI_Default's
+        // nearAssociated 10-1200 behaves the same. Holding the current target to that range stranded both
+        // near their spawn.
+        if (TargetType is not (NodeTargetType.HasAdditional or NodeTargetType.GrabbedUser)) {
+            float distanceSquared = (target.Position - actor.Position).LengthSquared();
+            float verticalOffset = target.Position.Z - actor.Position.Z;
+            return IsInRange(distanceSquared, verticalOffset, radiusSquared, actor.Value.Metadata.Distance.SightHeightUp, -actor.Value.Metadata.Distance.SightHeightDown);
+        }
+
+        return ShouldTargetActor(target, radiusSquared, actor.Value.Metadata.Distance.SightHeightUp, actor.Value.Metadata.Distance.SightHeightDown);
     }
 
     private int GetTargetType() {
@@ -242,23 +257,9 @@ public class BattleState {
             candidates = new List<(float, IActor)>();
         }
 
-        if (friendlyType == 0) {
-            foreach (FieldPlayer player in actor.Field.Players.Values) {
-                if (ShouldTargetActor(player, sightSquared, sightHeightUp, sightHeightDown, ref nextTargetDistance, candidates)) {
-                    nextTarget = player;
-                }
-            }
-        }
-
-        if (friendlyType == 1) {
-            foreach (FieldNpc npc in actor.Field.Npcs.Values) {
-                if (npc.Value.Metadata.Basic.Friendly != 0) {
-                    continue;
-                }
-
-                if (ShouldTargetActor(npc, sightSquared, sightHeightUp, sightHeightDown, ref nextTargetDistance, candidates)) {
-                    nextTarget = npc;
-                }
+        foreach (IActor enemy in EnumerateEnemies(friendlyType)) {
+            if (ShouldTargetActor(enemy, sightSquared, sightHeightUp, sightHeightDown, ref nextTargetDistance, candidates)) {
+                nextTarget = enemy;
             }
         }
 
@@ -281,5 +282,26 @@ public class BattleState {
         }
 
         Target = nextTarget;
+    }
+
+    // Field.Npcs only holds friendly npcs (Friendly 1 = ally, 2 = neutral); hostile ones are in Field.Mobs.
+    private IEnumerable<IActor> EnumerateEnemies(int friendlyType) {
+        if (friendlyType == 0) {
+            foreach (FieldPlayer player in actor.Field.Players.Values) {
+                yield return player;
+            }
+
+            // Allied npcs fight alongside players, so a hostile actor treats them as targets too.
+            // Neutral npcs (shop keepers and the like) are never attacked.
+            foreach (FieldNpc npc in actor.Field.Npcs.Values) {
+                if (npc.Value.Metadata.Basic.Friendly == 1) {
+                    yield return npc;
+                }
+            }
+        } else if (friendlyType == 1) {
+            foreach (FieldNpc mob in actor.Field.Mobs.Values) {
+                yield return mob;
+            }
+        }
     }
 }

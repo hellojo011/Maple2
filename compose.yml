@@ -14,12 +14,10 @@ services:
         dotnet tool update --global dotnet-ef --version 7.0.20 2>/dev/null || dotnet tool install --global dotnet-ef --version 7.0.20
         dotnet restore /app/Maple2.Server.World/Maple2.Server.World.csproj
         dotnet run
-    depends_on:
-      mysql:
-        condition: service_healthy
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
       MS2_DATA_FOLDER: /ClientData
     volumes:
@@ -35,8 +33,6 @@ services:
     image: maple2/login
     restart: unless-stopped
     depends_on:
-      mysql:
-        condition: service_healthy
       world:
         condition: service_healthy
     ports:
@@ -44,6 +40,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
       GRPC_WORLD_IP: world
     healthcheck:
@@ -60,14 +57,12 @@ services:
     container_name: maple2-world
     image: maple2/world
     restart: unless-stopped
-    depends_on:
-      mysql:
-        condition: service_healthy
     ports:
       - 21001:21001
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
       GRPC_LOGIN_IP: login
     healthcheck:
@@ -84,8 +79,6 @@ services:
     image: maple2/game
     restart: unless-stopped
     depends_on:
-      mysql:
-        condition: service_healthy
       world:
         condition: service_healthy
     # Ports are dynamically assigned from world server, sadly we can't dynamically expose them here. So we have to hardcode them.
@@ -95,6 +88,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
       GRPC_GAME_IP: game-ch1
       GRPC_WORLD_IP: world
@@ -106,8 +100,6 @@ services:
     image: maple2/game
     restart: unless-stopped
     depends_on:
-      mysql:
-        condition: service_healthy
       world:
         condition: service_healthy
     # Ports are dynamically assigned from world server, sadly we can't dynamically expose them here. So we have to hardcode them.
@@ -117,6 +109,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
       GRPC_GAME_IP: game-ch2
       GRPC_WORLD_IP: world
@@ -129,8 +122,6 @@ services:
     image: maple2/game
     restart: unless-stopped
     depends_on:
-      mysql:
-        condition: service_healthy
       world:
         condition: service_healthy
     # Ports are dynamically assigned from world server, sadly we can't dynamically expose them here. So we have to hardcode them.
@@ -140,6 +131,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
       GRPC_GAME_IP: game-ch0
       GRPC_WORLD_IP: world
@@ -152,29 +144,38 @@ services:
     container_name: maple2-web
     image: maple2/web
     restart: unless-stopped
-    depends_on:
-      mysql:
-        condition: service_healthy
+    volumes:
+      - ./Data:/Maple2.Server.Web/Data
     ports:
       - "${WEB_PORT:-4000}:${WEB_PORT:-4000}"
     env_file:
       - .env
     environment:
+      TZ: Asia/Seoul
       DB_IP: mysql
-
   mysql:
     image: mysql:8.0
     restart: unless-stopped
     container_name: maple2-db
+    command: >
+          --skip-log-bin
+          --innodb-flush-log-at-trx-commit=2
+          --innodb-buffer-pool-size=1G
+          --max-allowed-packet=256M
+          --net-read-timeout=600
+          --net-write-timeout=600
+          --wait-timeout=28800
+          --skip-name-resolve
     env_file:
       - .env
+    ports:
+      - '3307:3306'
     environment:
+      TZ: Asia/Seoul
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-maplestory}
       MYSQL_ROOT_HOST: "%"
     volumes:
       - mysql:/var/lib/mysql
-    ports:
-      - 3306:3306
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 5s

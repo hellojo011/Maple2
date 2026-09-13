@@ -429,7 +429,24 @@ public class AiState {
         Push(passed);
     }
 
-    private void ProcessNode(JumpNode node) { }
+    private void ProcessNode(JumpNode node) {
+        if (node.IsKeepBattle) {
+            actor.BattleState.KeepBattle = true;
+        }
+
+        // The ai script gives the jump speed in units per second, but MovementState multiplies
+        // whatever it is handed by the npc's own run speed, so scale it back out first.
+        float runSpeed = actor.Value.Metadata.Action.RunSpeed;
+        float speed = node.Speed > 0 && runSpeed > 0 ? node.Speed / runSpeed : 0;
+
+        // Flying is the closest thing to a leap that MovementState offers: it heads straight for
+        // the destination without needing a path along the ground.
+        NpcTask task = actor.MovementState.TryFlyTo(node.Pos, true, speed: speed, lookAt: true);
+
+        actor.AppendDebugMessage($"Jump to {node.Pos}\n");
+
+        SetNodeTask(task);
+    }
 
     private void ProcessNode(SelectNode node) {
         var weightedEntries = new WeightedSet<(Entry, int)>();

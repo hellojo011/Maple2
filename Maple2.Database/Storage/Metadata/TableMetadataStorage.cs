@@ -67,6 +67,12 @@ public class TableMetadataStorage {
     private readonly Lazy<ItemEquipVariationTable> petVariationTable;
     private readonly Lazy<ItemEquipVariationTable> weaponVariationTable;
 
+    private readonly Lazy<MaidPropertyTable> maidPropertyTable;
+    private readonly Lazy<MaidExpTable> maidExpTable;
+    private readonly Lazy<MaidSalaryTable> maidSalaryTable;
+    private readonly Lazy<MaidRecipeGroupTable> maidRecipeGroupTable;
+    private readonly Lazy<MaidRecipeTable> maidRecipeTable;
+
     private readonly Lazy<DungeonRoomTable> dungeonRoomTable;
     private readonly Lazy<DungeonRankRewardTable> dungeonRankRewardTable;
     private readonly Lazy<DungeonConfigTable> dungeonConfigTable;
@@ -134,6 +140,12 @@ public class TableMetadataStorage {
     public ItemEquipVariationTable PetVariationTable => petVariationTable.Value;
     public ItemEquipVariationTable WeaponVariationTable => weaponVariationTable.Value;
 
+    public MaidPropertyTable MaidPropertyTable => maidPropertyTable.Value;
+    public MaidExpTable MaidExpTable => maidExpTable.Value;
+    public MaidSalaryTable MaidSalaryTable => maidSalaryTable.Value;
+    public MaidRecipeGroupTable MaidRecipeGroupTable => maidRecipeGroupTable.Value;
+    public MaidRecipeTable MaidRecipeTable => maidRecipeTable.Value;
+
     public DungeonRoomTable DungeonRoomTable => dungeonRoomTable.Value;
     public DungeonRankRewardTable DungeonRankRewardTable => dungeonRankRewardTable.Value;
     public DungeonConfigTable DungeonConfigTable => dungeonConfigTable.Value;
@@ -141,6 +153,11 @@ public class TableMetadataStorage {
 
     public TableMetadataStorage(MetadataContext context) {
         chatStickerTable = Retrieve<ChatStickerTable>(context, TableNames.CHAT_EMOTICON);
+        maidPropertyTable = Retrieve<MaidPropertyTable>(context, TableNames.MAID_PROPERTY);
+        maidExpTable = Retrieve<MaidExpTable>(context, TableNames.MAID_EXP);
+        maidSalaryTable = Retrieve<MaidSalaryTable>(context, TableNames.MAID_SALARY);
+        maidRecipeGroupTable = Retrieve<MaidRecipeGroupTable>(context, TableNames.MAID_RECIPE_GROUP);
+        maidRecipeTable = Retrieve<MaidRecipeTable>(context, TableNames.MAID_RECIPE);
         defaultItemsTable = Retrieve<DefaultItemsTable>(context, TableNames.DEFAULT_ITEMS);
         itemBreakTable = Retrieve<ItemBreakTable>(context, TableNames.ITEM_BREAK_INGREDIENT);
         itemExtractionTable = Retrieve<ItemExtractionTable>(context, TableNames.ITEM_EXTRACTION);

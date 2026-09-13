@@ -111,7 +111,14 @@ public partial class MovementState {
         }
 
         if (actor.Navigation is null) {
-            task.Cancel();
+            // No navmesh agent, so there is no path to follow: walk straight there.
+            walkTargetPosition = position;
+            walkType = WalkType.Direct;
+            walkLookWhenDone = lookAt;
+            walkTask = task;
+
+            UpdateMoveSpeed(speed);
+            StartWalking(sequence, task);
 
             return;
         }
@@ -213,7 +220,8 @@ public partial class MovementState {
             type = WalkType.FromTarget;
         } else if (currentDistance > toDistance * toDistance) {
             actor.AppendDebugMessage($"> Pathing to target\n");
-            foundPath = actor.Navigation.PathTo(target.Position);
+            // Chasing: a monster must not climb onto ledges the target jumped up to.
+            foundPath = actor.Navigation.PathTo(target.Position, limitHeight: true);
         }
 
         if (!foundPath) {

@@ -44,6 +44,13 @@ public static class TableNames {
     public const string SMART_PUSH = "smartpush.xml";
     public const string AUTO_ACTION = "autoactionpricepackage.xml";
 
+    // Maid
+    public const string MAID_PROPERTY = "maidproperty.xml";
+    public const string MAID_EXP = "maidexp.xml";
+    public const string MAID_RECIPE = "maidrecipe.xml";
+    public const string MAID_RECIPE_GROUP = "maidrecipegroup.xml";
+    public const string MAID_SALARY = "*/maidsalary.xml";
+
     // Prestige / Adventure
     public const string PRESTIGE_LEVEL_ABILITY = "adventurelevelability.xml";
     public const string PRESTIGE_LEVEL_REWARD = "adventurelevelreward.xml";

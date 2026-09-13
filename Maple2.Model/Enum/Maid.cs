@@ -5,3 +5,9 @@ public enum MaidMood : byte {
     Good = 1,
     VeryGood = 2,
 }
+
+/// <summary>maidsalary.xml SalaryType: which currency the salary is charged in.</summary>
+public enum MaidSalaryType : byte {
+    Meso = 0,
+    Meret = 1,
+}

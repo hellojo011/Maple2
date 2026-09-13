@@ -102,12 +102,13 @@ public class TriggerMapper : TypeMapper<TriggerMetadata> {
 
         foreach (string importPath in importPaths) {
             try {
-                // Find the imported file in the reader
-                PackFileEntry? importFile = reader.Files.FirstOrDefault(f => f.Name.Equals(importPath, StringComparison.Ordinal));
-                if (importFile == null) {
-                    importFile = reader.Files.FirstOrDefault(f => f.Name.EndsWith('/' + Path.GetFileName(importPath), StringComparison.OrdinalIgnoreCase)
-                                                                 || f.Name.Equals(importPath, StringComparison.OrdinalIgnoreCase));
-                }
+                // Find the imported file in the reader. Pack paths are lower case while the import
+                // path keeps the author's casing, so the whole path has to be compared before falling
+                // back to the file name - several folders hold a file called CheckUserCount.xml and
+                // matching on the name alone picks whichever comes first.
+                PackFileEntry? importFile = reader.Files.FirstOrDefault(f => f.Name.Equals(importPath, StringComparison.Ordinal))
+                                            ?? reader.Files.FirstOrDefault(f => f.Name.Equals(importPath, StringComparison.OrdinalIgnoreCase))
+                                            ?? reader.Files.FirstOrDefault(f => f.Name.EndsWith('/' + Path.GetFileName(importPath), StringComparison.OrdinalIgnoreCase));
                 if (importFile == null) continue;
 
                 XmlDocument importDoc = reader.GetXmlDocument(importFile);

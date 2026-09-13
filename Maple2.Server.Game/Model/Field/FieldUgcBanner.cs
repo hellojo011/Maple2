@@ -12,7 +12,7 @@ public class FieldUgcBanner : UgcBanner, IUpdatable {
     }
 
     public void Update(long tickCount) {
-        DateTimeOffset dateTimeOffset = DateTimeOffset.UtcNow;
+        DateTimeOffset dateTimeOffset = DateTimeOffset.Now;
 
         DeleteOldBannerSlots(dateTimeOffset);
 

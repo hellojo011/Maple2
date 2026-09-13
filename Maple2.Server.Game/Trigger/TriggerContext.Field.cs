@@ -150,6 +150,12 @@ public partial class TriggerContext {
 
             agent.Visible = visible;
             Broadcast(TriggerPacket.Update(agent));
+
+            // A visible agent stands in the way of npc pathing. Map entities ingested before the position
+            // was stored have none, and there is nothing to block then.
+            if (agent.Metadata.Position != default) {
+                Field.Navigation.SetAgentBlocking(triggerId, agent.Metadata.Position, visible);
+            }
         }
     }
 
@@ -219,7 +225,7 @@ public partial class TriggerContext {
             string.Join(",", triggerIds), visible, animationEffect, animationDelay);
         foreach (int triggerId in triggerIds) {
             if (!Objects.Ladders.TryGetValue(triggerId, out TriggerObjectLadder? ladder)) {
-                return;
+                continue;
             }
 
             ladder.Visible = visible;

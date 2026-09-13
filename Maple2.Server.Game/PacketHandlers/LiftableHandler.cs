@@ -37,7 +37,6 @@ public class LiftableHandler : FieldPacketHandler {
         if (session.HeldCube == null) {
             return;
         }
-
         session.Field.Broadcast(SetCraftModePacket.Liftable(session.Player.ObjectId, session.HeldCube));
     }
 }

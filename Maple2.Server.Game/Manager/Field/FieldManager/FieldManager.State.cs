@@ -42,6 +42,8 @@ public partial class FieldManager {
     private readonly ConcurrentDictionary<string, FieldFunctionInteract> fieldFunctionInteracts = new();
     private readonly ConcurrentDictionary<string, FieldInteract> fieldAdBalloons = new();
     private readonly ConcurrentDictionary<string, FieldInteract> fieldChests = new();
+    /// <summary>Function cube entity id -> object id of the npc it spawned.</summary>
+    private readonly ConcurrentDictionary<string, int> functionCubeNpcs = new();
     private readonly ConcurrentDictionary<int, FieldInstrument> fieldInstruments = new();
     private readonly ConcurrentDictionary<int, FieldItem> fieldItems = new();
     private readonly ConcurrentDictionary<int, FieldMobSpawn> fieldMobSpawns = new();
@@ -114,7 +116,7 @@ public partial class FieldManager {
         return fieldPlayer;
     }
 
-    public FieldNpc? SpawnNpc(NpcMetadata npc, Vector3 position, Vector3 rotation, bool disableAi = false, FieldMobSpawn? owner = null, SpawnPointNPC? spawnPointNpc = null, string spawnAnimation = "") {
+    public FieldNpc? SpawnNpc(NpcMetadata npc, Vector3 position, Vector3 rotation, bool disableAi = false, FieldMobSpawn? owner = null, SpawnPointNPC? spawnPointNpc = null, string spawnAnimation = "", bool useNavigation = true) {
         // Apply random offset if SpawnRadius is set
         Vector3 spawnPosition = position;
         if (spawnPointNpc?.SpawnRadius > 0) {
@@ -139,7 +141,9 @@ public partial class FieldManager {
             }
         }
 
-        DtCrowdAgent agent = Navigation.AddAgent(npc, spawnPosition);
+        // The crowd snaps a new agent onto the nearest navmesh polygon, so an npc standing
+        // somewhere the navmesh does not cover has to go without one and stay put instead.
+        DtCrowdAgent? agent = useNavigation ? Navigation.AddAgent(npc, spawnPosition) : null;
 
         AnimationMetadata? animation = NpcMetadata.GetAnimation(npc.Model.Name);
         string aiPath = disableAi ? string.Empty : npc.AiPath;
@@ -534,6 +538,125 @@ public partial class FieldManager {
         }
     }
 
+    /// <summary>
+    /// Field treasure chests stand on region spawns the xblock names "Chest_Normal_*" and
+    /// "Chest_Rare_*". Which interact object belongs there is not in any table - the original
+    /// server hardcoded it - but the action prompts name them: stringinteractobjectaction has
+    /// 11000004 as "wooden treasure chest" and 11000001 as "golden treasure chest", and their
+    /// global drop boxes and reset times line up with the two tiers.
+    /// </summary>
+    private const int NormalChestInteractId = 11000004;
+    private const int RareChestInteractId = 11000001;
+
+    // The A pair in Map.m2d is the field chest, spelled the way InteractObject.WriteTo
+    // documents it. The other two strings are animation names, not asset suffixes: the client
+    // plays Opened_A while the chest counts as used and Idle_A while it can be opened, which
+    // is what leaves an opened chest standing open until it resets.
+    private const string NormalChestAsset = "interaction_chestA_01";
+    private const string RareChestAsset = "interaction_chestA_02";
+    private const string ChestOpenedAnimation = "Opened_A";
+    private const string ChestIdleAnimation = "Idle_A";
+    private const string ChestModel = "MS2InteractActor";
+    private const float ChestScale = 1f;
+
+    public void SpawnFieldChests() {
+        foreach (FieldChestSpawn chest in Entities.ChestSpawns) {
+            // A golden chest has its own interact object so its trophy can count it; falling
+            // back to the generic one still drops the same loot.
+            int interactId = NormalChestInteractId;
+            if (chest.Rare) {
+                int code = 0;
+                try {
+                    code = FieldChestCodes.Get(AchievementMetadata, MapId, chest.Spawn.Id);
+                } catch (Exception ex) {
+                    logger.Warning(ex, "Failed to resolve the golden chest id for map {MapId}", MapId);
+                }
+
+                interactId = code > 0 ? code : RareChestInteractId;
+            }
+
+            if (!TableMetadata.InteractObjectTable.Entries.TryGetValue(interactId, out InteractObjectMetadata? metadata)) {
+                logger.Warning("Missing interact object {InteractId} for field chest in map {MapId}", interactId, MapId);
+                continue;
+            }
+
+            string asset = chest.Rare ? RareChestAsset : NormalChestAsset;
+            var interactObject = new InteractMeshObject($"Chest_{chest.Spawn.Id}",
+                new Ms2InteractMesh(interactId, chest.Spawn.Position, chest.Spawn.Rotation)) {
+                Asset = asset,
+                Model = ChestModel,
+                NormalState = ChestOpenedAnimation,
+                Reactable = ChestIdleAnimation,
+                Scale = ChestScale,
+            };
+
+            var fieldInteract = new FieldInteract(this, NextLocalId(), interactObject.EntityId, metadata, interactObject) {
+                Transform = new Transform {
+                    Position = chest.Spawn.Position,
+                    RotationAnglesDegrees = chest.Spawn.Rotation,
+                },
+                SpawnId = chest.Spawn.Id,
+                // Collection marks the objects a character only ever gets once.
+                PerPlayer = metadata.Collection > 0,
+            };
+
+            fieldChests[interactObject.EntityId] = fieldInteract;
+        }
+    }
+
+    /// <summary>
+    /// Monsters an interact object lets loose when someone uses it: a chance to trigger, how
+    /// many, how far around the object they scatter and how long they stay. This is what makes
+    /// the quests that ambush you from a searched object work.
+    /// </summary>
+    public void SpawnInteractNpcs(FieldInteract interact) {
+        foreach (InteractObjectMetadataSpawn spawn in interact.Value.Spawn) {
+            if (spawn.Id <= 0 || spawn.Count <= 0) {
+                continue;
+            }
+
+            // Out of 10000, the same scale the drop tables use.
+            if (spawn.Probability > 0 && Random.Shared.Next(10000) >= spawn.Probability) {
+                continue;
+            }
+
+            if (!NpcMetadata.TryGet(spawn.Id, out NpcMetadata? npcMetadata)) {
+                logger.Warning("Npc {NpcId} for interact object {InteractId} not found", spawn.Id, interact.Value.Id);
+                continue;
+            }
+
+            for (int i = 0; i < spawn.Count; i++) {
+                FieldNpc? npc = SpawnNpc(npcMetadata, ScatterAround(interact.Position, spawn.Radius), interact.Rotation);
+                if (npc is null) {
+                    continue;
+                }
+
+                Broadcast(FieldPacket.AddNpc(npc));
+                Broadcast(ProxyObjectPacket.AddNpc(npc));
+
+                if (spawn.LifeTime > 0) {
+                    int objectId = npc.ObjectId;
+                    Scheduler.Schedule(() => RemoveNpc(objectId), TimeSpan.FromMilliseconds(spawn.LifeTime));
+                }
+            }
+        }
+    }
+
+    /// <summary>A walkable point within the radius, or the centre when the navmesh has none.</summary>
+    private Vector3 ScatterAround(Vector3 center, int radius) {
+        if (radius <= 0) {
+            return center;
+        }
+
+        float angle = Random.Shared.NextSingle() * MathF.PI * 2;
+        float distance = Random.Shared.NextSingle() * radius;
+        Vector3 scattered = center + new Vector3(MathF.Cos(angle) * distance, MathF.Sin(angle) * distance, 0);
+
+        return FindNearestPoly(scattered, out long nearestRef, out RcVec3f validPosition) && nearestRef != 0
+            ? DotRecastHelper.FromNavMeshSpace(validPosition)
+            : center;
+    }
+
     public void SpawnInteractObject(SpawnInteractObjectMetadata metadata) {
         if (!Entities.RegionSpawns.TryGetValue(metadata.RegionSpawnId, out Ms2RegionSpawn? boxSpawn) ||
             !TableMetadata.InteractObjectTable.Entries.TryGetValue(metadata.InteractId, out InteractObjectMetadata? interactObjectMetadata)) {
@@ -647,16 +770,22 @@ public partial class FieldManager {
     private IEnumerable<IActor> GetTargetPool(IActor caster, Prism[] prisms, ApplyTargetType targetType, int limit, ICollection<IActor>? ignore) {
         switch (targetType) {
             case ApplyTargetType.Friendly:
-                if (caster is FieldNpc) {
-                    return prisms.Filter(Mobs.Values, limit, ignore);
+                if (caster is FieldNpc friendlyCaster) {
+                    return IsMob(friendlyCaster)
+                        ? prisms.Filter(Mobs.Values, limit, ignore)
+                        : prisms.Filter(PlayerSide(), limit, ignore);
                 } else if (caster is FieldPlayer) {
                     return prisms.Filter(Players.Values, limit, ignore);
                 }
                 Log.Debug("Unhandled ApplyTargetType:{Entity} for {caster.GetType()}", targetType, caster.GetType());
                 return [];
             case ApplyTargetType.Hostile:
-                if (caster is FieldNpc) {
-                    return prisms.Filter(Players.Values, limit, ignore);
+                if (caster is FieldNpc hostileCaster) {
+                    // An allied npc's enemies are the mobs, not the players fighting beside it.
+                    // Without this the vigilante archers and cannons in 52000120_qd shell the player.
+                    return IsMob(hostileCaster)
+                        ? prisms.Filter(PlayerSide(), limit, ignore)
+                        : prisms.Filter(Mobs.Values, limit, ignore);
                 } else if (caster is FieldPlayer) {
                     //TODO Include other players if PVP is Active
                     return prisms.Filter(Mobs.Values, limit, ignore);
@@ -671,6 +800,14 @@ public partial class FieldManager {
             default:
                 Log.Debug("Unhandled SkillEntity:{Entity}", targetType);
                 return [];
+        }
+
+        // Mobs live in Field.Mobs, friendly npcs in Field.Npcs - Friendly 1 fights alongside the
+        // players, Friendly 2 is a neutral bystander that neither side attacks.
+        static bool IsMob(FieldNpc npc) => npc.Value.Metadata.Basic.Friendly == 0;
+
+        IEnumerable<IActor> PlayerSide() {
+            return Players.Values.Concat<IActor>(Npcs.Values.Where(npc => npc.Value.Metadata.Basic.Friendly == 1));
         }
     }
 
@@ -861,11 +998,174 @@ public partial class FieldManager {
 
         Broadcast(FunctionCubePacket.AddFunctionCube(cube.Interact));
 
+        if (cube.Interact.Metadata.ControlType is InteractCubeControlType.SpawnNPC) {
+            SpawnFunctionCubeNpc(cube, fieldInteract);
+        }
+
         return fieldInteract;
     }
 
+    /// <summary>
+    /// A cube with ControlType SpawnNPC stands an npc on top of itself. Maid contracts
+    /// (item 508000xx) are placed this way and name their npc in Property.MaidId.
+    /// </summary>
+    private void SpawnFunctionCubeNpc(PlotCube cube, FieldFunctionInteract fieldInteract) {
+        if (!ItemMetadata.TryGet(cube.ItemId, out ItemMetadata? itemMetadata)) {
+            return;
+        }
+
+        int npcId = itemMetadata.Property.MaidId;
+        if (npcId <= 0) {
+            return;
+        }
+
+        if (!NpcMetadata.TryGet(npcId, out NpcMetadata? npcMetadata)) {
+            logger.Warning("Npc {NpcId} for SpawnNPC cube item {ItemId} not found", npcId, cube.ItemId);
+            return;
+        }
+
+        // A pad stacked on top of other cubes stands above the terrain the navmesh was baked
+        // from, and the crowd would snap the maid down to that terrain. Such a maid keeps its
+        // pad instead of walking.
+        bool walkable = IsOnNavigableGround(fieldInteract.Position);
+        FieldNpc? fieldNpc = SpawnNpc(npcMetadata, fieldInteract.Position, fieldInteract.Rotation, useNavigation: walkable);
+        if (fieldNpc is null) {
+            logger.Warning("Failed to spawn npc {NpcId} for SpawnNPC cube item {ItemId}", npcId, cube.ItemId);
+            return;
+        }
+
+        // The employment belongs to the account: placing a contract for the first time hires
+        // the maid, and putting the pad back down later returns the same one. The pad it is
+        // standing on now is recorded so the client can tie the npc to it.
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        long ownerId = this is HomeFieldManager home ? home.OwnerId : 0;
+        long employment = ServerTableMetadata.ConstantsTable.PeriodOfMaidEmployment * 24L * 60 * 60;
+
+        Maid? maid;
+        (long Uid, long ExpiryTime) contract;
+        using (GameStorage.Request db = GameStorage.Context()) {
+            // The employment period belongs to the contract item, which is the date the housing
+            // tool shows, so it wins over whatever the row last recorded.
+            contract = db.GetMaidContract(ownerId, cube.ItemId);
+            long expiry = contract.ExpiryTime > 0 ? contract.ExpiryTime : now + employment;
+
+            // A freshly hired maid starts in the best mood and decays from there.
+            maid = db.GetMaid(ownerId, npcId, cube.Id)
+                   ?? db.CreateMaid(ownerId, cube.Id, npcId, now, expiry, MaidUtil.MoodMax);
+
+            if (maid is not null) {
+                maid.ContractItemUid = contract.Uid;
+                maid.ExpiryTime = expiry;
+            }
+        }
+
+        if (maid is null) {
+            logger.Warning("Failed to load maid for cube {CubeUid}", cube.Id);
+            RemoveNpc(fieldNpc.ObjectId);
+            return;
+        }
+
+        // Captured order on the real server: UserMaid (mode 1) -> FieldMaid -> FieldAddNpc.
+        // The client keeps its maid list from UserMaid, so the field maid has to be in it.
+        Broadcast(MaidPacket.Update(maid));
+        Broadcast(MaidPacket.Field(maid));
+
+        // The client ties the field npc back to the maid through this uid, so it has to be
+        // the same value the maid block carries.
+        fieldNpc.OwnerItemUid = maid.ItemUid;
+        fieldNpc.Maid = maid;
+        functionCubeNpcs[cube.Interact!.Id] = fieldNpc.ObjectId;
+
+        Broadcast(FieldPacket.AddNpc(fieldNpc));
+        Broadcast(ProxyObjectPacket.AddNpc(fieldNpc));
+
+        logger.Debug("[SpawnNPC] cube item {ItemId} spawned maid npc {NpcId} as object {ObjectId}",
+            cube.ItemId, npcId, fieldNpc.ObjectId);
+    }
+
     public bool RemoveFieldFunctionInteract(string entityId) {
+        // A SpawnNPC cube owns the npc standing on it, so take that with the cube. The maid
+        // itself stays hired: putting the pad back down brings the same maid back.
+        if (functionCubeNpcs.TryRemove(entityId, out int npcObjectId)) {
+            RemoveNpc(npcObjectId);
+        }
+
         return fieldFunctionInteracts.TryRemove(entityId, out FieldFunctionInteract? _);
+    }
+
+    /// <summary>
+    /// Where an npc without a navmesh agent may stand at the height it is already at: on top
+    /// of every cube one block below it, as long as nothing was built on that top block.
+    /// </summary>
+    public IList<Vector3> StandingSpotsAt(Vector3 position) {
+        var occupied = new HashSet<Vector3B>();
+        foreach (Plot plot in Plots.Values) {
+            foreach (PlotCube cube in plot.Cubes.Values) {
+                occupied.Add(cube.Position);
+            }
+        }
+
+        Vector3B standing = position;
+        var spots = new List<Vector3>();
+        foreach (Vector3B cube in occupied) {
+            if (cube.Z != standing.Z - 1) {
+                continue;
+            }
+
+            var top = new Vector3B(cube.X, cube.Y, standing.Z);
+            if (!occupied.Contains(top)) {
+                spots.Add(top);
+            }
+        }
+
+        return spots;
+    }
+
+    /// <summary>
+    /// True when the navmesh has walkable ground at this exact height. Housing cubes are not
+    /// baked into it, so a spot on top of a cube stack answers false.
+    /// </summary>
+    private bool IsOnNavigableGround(Vector3 position) {
+        if (!FindNearestPoly(position, out long nearestRef, out RcVec3f navPosition) || nearestRef == 0) {
+            return false;
+        }
+
+        return Math.Abs(DotRecastHelper.FromNavMeshSpace(navPosition).Z - position.Z) <= Constant.BlockSize / 2f;
+    }
+
+    /// <summary>
+    /// True when a walkable point is somewhere a housing npc may stand: inside the plot,
+    /// and not inside a placed cube. A home map's navmesh covers the terrain around the
+    /// plot and ignores cubes, so water and walls have to be rejected separately.
+    /// </summary>
+    public bool IsFreeStandingSpot(Vector3 position) {
+        var occupied = new HashSet<Vector3B>();
+        float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
+        foreach (Plot plot in Plots.Values) {
+            foreach (PlotCube cube in plot.Cubes.Values) {
+                occupied.Add(cube.Position);
+                Vector3 world = cube.Position;
+                minX = Math.Min(minX, world.X);
+                maxX = Math.Max(maxX, world.X);
+                minY = Math.Min(minY, world.Y);
+                maxY = Math.Max(maxY, world.Y);
+            }
+        }
+
+        if (occupied.Count == 0) {
+            return true;
+        }
+
+        if (position.X < minX || position.X > maxX || position.Y < minY || position.Y > maxY) {
+            return false;
+        }
+
+        return !occupied.Contains(position);
+    }
+
+    /// <summary>Maids are addressed by the uid of their contract item.</summary>
+    public Maid? GetMaid(long itemUid) {
+        return Npcs.Values.FirstOrDefault(npc => npc.Maid?.ItemUid == itemUid)?.Maid;
     }
 
     public FieldFunctionInteract? TryGetFieldFunctionInteract(string entityId) {
@@ -1009,6 +1309,16 @@ public partial class FieldManager {
         }
         foreach (FieldInteract fieldInteract in fieldChests.Values) {
             added.Session.Send(InteractObjectPacket.Add(fieldInteract.Object));
+
+            // Add always claims the object is reactable, so anything else has to be corrected
+            // right after: a chest still on its reset timer, or one this character already
+            // opened for good, has to arrive standing open.
+            InteractState state = fieldInteract.PerPlayer && added.Value.Unlock.InteractedObjects.Contains(fieldInteract.Value.Id)
+                ? InteractState.Normal
+                : fieldInteract.State;
+            if (state != InteractState.Reactable) {
+                added.Session.Send(InteractObjectPacket.Update(fieldInteract, state));
+            }
         }
         foreach (FieldInstrument fieldInstrument in fieldInstruments.Values) {
             if (fieldInstrument.Score != null) {
@@ -1047,6 +1357,14 @@ public partial class FieldManager {
         foreach (FieldItem fieldItem in fieldItems.Values) {
             added.Session.Send(FieldPacket.DropItem(fieldItem));
         }
+        // Maids must reach the client's maid list before their npc does, or the client
+        // treats them as ordinary npcs. Cubes placed while nobody was in the field got
+        // their packets broadcast to an empty field, so resend them on entry.
+        foreach (FieldNpc maidNpc in Npcs.Values.Where(npc => npc.Maid is not null)) {
+            added.Session.Send(MaidPacket.Update(maidNpc.Maid!));
+            added.Session.Send(MaidPacket.Field(maidNpc.Maid!));
+        }
+
         foreach (FieldNpc fieldNpc in Npcs.Values.Concat(Mobs.Values)) {
             added.Session.Send(FieldPacket.AddNpc(fieldNpc));
             if (fieldNpc.IsCorpse) {

@@ -23,12 +23,29 @@ public partial class FieldManager {
             return;
         }
 
-        DateTimeOffset dateTimeOffset = DateTimeOffset.UtcNow;
+        DateTimeOffset dateTimeOffset = DateTimeOffset.Now;
+		
+		using GameStorage.Request db = GameStorage.Context();
+
+        // 다른 채널의 예약을 반영
+        foreach (FieldUgcBanner ugcBanner in Banners.Values) {
+            List<BannerSlot> fresh = db.FindBannerSlotsByBannerId(ugcBanner.Id);
+
+            // 현재 활성 슬롯의 Active 상태는 보존
+            foreach (BannerSlot slot in fresh) {
+                BannerSlot? existing = ugcBanner.Slots.FirstOrDefault(x => x.Id == slot.Id);
+                if (existing is not null) {
+                    slot.Active = existing.Active;
+                }
+            }
+
+            ugcBanner.Slots.Clear();
+            ugcBanner.Slots.AddRange(fresh);
+        }
         foreach (FieldUgcBanner ugcBanner in Banners.Values) {
             ugcBanner.Update(FieldTick);
         }
 
-        using GameStorage.Request db = GameStorage.Context();
         foreach (UgcBanner ugcBanner in Banners.Values) {
             List<BannerSlot> expiredSlots = ugcBanner.Slots.Where(x => x.Expired).ToList();
 
@@ -144,7 +161,7 @@ public partial class FieldManager {
                     return;
                 }
 
-                session.HeldCube = null;
+session.HeldCube = null;
                 fieldLiftable.Count = 1;
                 fieldLiftable.State = LiftableState.Default;
                 fieldLiftable.Position = position;

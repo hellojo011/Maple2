@@ -224,13 +224,16 @@ public class UgcHandler : FieldPacketHandler {
             CreationTime = DateTime.Now.ToEpochSeconds(),
             Name = $"AD Banner {bannerId}",
         };
-
+		
+		using GameStorage.Request db = session.GameStorage.Context();
         foreach (BannerSlot slot in slots) {
             slot.Template = ugc;
 
             BannerSlot oldSlot = banner.Slots.First(x => x.Id == slot.Id);
             banner.Slots.Remove(oldSlot);
             banner.Slots.Add(slot);
+
+			db.UpdateBannerSlot(slot);   // ← 추가
         }
 
         session.Send(UgcPacket.Upload(resource));
@@ -520,6 +523,11 @@ public class UgcHandler : FieldPacketHandler {
         List<BannerSlot> newSlots = [];
 
         using GameStorage.Request db = session.GameStorage.Context();
+		        // 다른 채널의 예약을 먼저 반영
+        List<BannerSlot> current = db.FindBannerSlotsByBannerId(banner.Id);
+        banner.Slots.Clear();
+        banner.Slots.AddRange(current);
+
         for (int i = 0; i < hours; i++) {
             var reservation = packet.Read<UgcBannerReservation>();
 

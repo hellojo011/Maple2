@@ -2,8 +2,10 @@
 using System.Globalization;
 using System.Numerics;
 using Maple2.Database.Extensions;
+using System.Xml;
 using Maple2.File.Ingest.Utils;
 using Maple2.File.IO;
+using Maple2.File.IO.Crypto.Common;
 using Maple2.File.Parser;
 using Maple2.File.Parser.Enum;
 using Maple2.File.Parser.Xml;
@@ -38,11 +40,13 @@ namespace Maple2.File.Ingest.Mapper;
 public class TableMapper : TypeMapper<TableMetadata> {
     private readonly TableParser parser;
     private readonly ItemOptionParser optionParser;
+    private readonly M2dReader xmlReader;
     private readonly string language;
 
     public TableMapper(M2dReader xmlReader, string language) {
         parser = new TableParser(xmlReader, language);
         optionParser = new ItemOptionParser(xmlReader);
+        this.xmlReader = xmlReader;
         this.language = language;
     }
 
@@ -87,6 +91,13 @@ public class TableMapper : TypeMapper<TableMetadata> {
         yield return new TableMetadata { Name = TableNames.SEASON_DATA, Table = ParseSeasonDataTable() };
         yield return new TableMetadata { Name = TableNames.SMART_PUSH, Table = ParseSmartPushTable() };
         yield return new TableMetadata { Name = TableNames.AUTO_ACTION, Table = ParseAutoActionTable() };
+
+        // Maid
+        yield return new TableMetadata { Name = TableNames.MAID_PROPERTY, Table = ParseMaidProperty() };
+        yield return new TableMetadata { Name = TableNames.MAID_EXP, Table = ParseMaidExp() };
+        yield return new TableMetadata { Name = TableNames.MAID_SALARY, Table = ParseMaidSalary() };
+        yield return new TableMetadata { Name = TableNames.MAID_RECIPE_GROUP, Table = ParseMaidRecipeGroup() };
+        yield return new TableMetadata { Name = TableNames.MAID_RECIPE, Table = ParseMaidRecipe() };
 
         // Marriage/Wedding
         yield return new TableMetadata { Name = TableNames.WEDDING, Table = ParseWeddingTable() };
@@ -727,6 +738,165 @@ public class TableMapper : TypeMapper<TableMetadata> {
 
         return new MasteryRecipeTable(results);
     }
+
+    #region Maid
+    // The maid tables have no parser support in Maple2.File.Parser, so they are read
+    // straight out of the archive the same way TriggerMapper reads trigger scripts.
+    private MaidPropertyTable ParseMaidProperty() {
+        var results = new Dictionary<int, MaidPropertyTable.Entry>();
+        foreach (XmlNode node in SelectTableNodes("maidproperty.xml", "Property")) {
+            int maidId = MaidInt(node, "MaidID");
+            results[maidId] = new MaidPropertyTable.Entry(
+                MaidId: maidId,
+                NpcId: MaidInt(node, "NPCID"),
+                RecipeGroupId: MaidInt(node, "RecipeGroupID"));
+        }
+
+        return new MaidPropertyTable(results);
+    }
+
+    private MaidExpTable ParseMaidExp() {
+        var results = new Dictionary<short, long>();
+        foreach (XmlNode node in SelectTableNodes("maidexp.xml", "Exp")) {
+            results[(short) MaidInt(node, "Level")] = MaidInt(node, "Exp");
+        }
+
+        return new MaidExpTable(results);
+    }
+
+    private MaidSalaryTable ParseMaidSalary() {
+        var results = new Dictionary<int, MaidSalaryTable.Entry>();
+        foreach (XmlNode node in SelectTableNodes($"{language}/maidsalary.xml", "key", localized: true)) {
+            int maidId = MaidInt(node, "id");
+            results[maidId] = new MaidSalaryTable.Entry(
+                MaidId: maidId,
+                SalaryType: MaidInt(node, "SalaryType"),
+                Amount: MaidInt(node, "SalaryAmount"));
+        }
+
+        return new MaidSalaryTable(results);
+    }
+
+    private MaidRecipeGroupTable ParseMaidRecipeGroup() {
+        var results = new Dictionary<int, MaidRecipeGroupTable.Entry>();
+        foreach (XmlNode node in SelectTableNodes("maidrecipegroup.xml", "group")) {
+            int groupId = MaidInt(node, "GroupID");
+            int[] recipeIds = ParseMaidIntList(node.Attributes?["RecipeIDs"]?.Value);
+            int[] requireLevels = ParseMaidIntList(node.Attributes?["RequireLevels"]?.Value);
+
+            var unlocks = new List<MaidRecipeGroupTable.Unlock>(recipeIds.Length);
+            for (int i = 0; i < recipeIds.Length; i++) {
+                // RequireLevels is positional; fall back to level 1 when it is shorter.
+                short level = i < requireLevels.Length ? (short) requireLevels[i] : (short) 1;
+                unlocks.Add(new MaidRecipeGroupTable.Unlock(recipeIds[i], level));
+            }
+
+            results[groupId] = new MaidRecipeGroupTable.Entry(groupId, unlocks);
+        }
+
+        return new MaidRecipeGroupTable(results);
+    }
+
+    private MaidRecipeTable ParseMaidRecipe() {
+        var results = new Dictionary<int, MaidRecipeTable.Entry>();
+        foreach (XmlNode node in SelectTableNodes("maidrecipe.xml", "recipe")) {
+            // Recipes are listed once globally and again per locale that overrides them.
+            // The locale rows come last, so the applicable one wins.
+            if (!M2dXmlGenerator.FeatureLocaleFilter.HasLocale(node.Attributes?["locale"]?.Value ?? string.Empty)) {
+                continue;
+            }
+
+            int id = MaidInt(node, "Id");
+            results[id] = new MaidRecipeTable.Entry(
+                Id: id,
+                Ingredients: ParseMaidIngredients(node),
+                WorkbenchType: MaidInt(node, "WorkbenchType"),
+                LeadTimeNormal: MaidInt(node, "LeadTimeNormal"),
+                LeadTimeGood: MaidInt(node, "LeadTimeGood"),
+                LeadTimeVeryGood: MaidInt(node, "LeadTimeVeryGood"),
+                MaidExp: MaidInt(node, "MaidExp"),
+                MaidMood: MaidInt(node, "MaidMood"),
+                Product: new ItemComponent(
+                    ItemId: MaidInt(node, "ProductItemID"),
+                    Rarity: MaidInt(node, "ProductRank", 1),
+                    Amount: MaidInt(node, "ProductCount", 1),
+                    Tag: ItemTag.None));
+        }
+
+        return new MaidRecipeTable(results);
+    }
+
+    private IEnumerable<XmlNode> SelectTableNodes(string fileName, string nodeName, bool localized = false) {
+        string path = $"table/{fileName}";
+        PackFileEntry? file = xmlReader.Files
+            .FirstOrDefault(entry => entry.Name.Equals(path, StringComparison.OrdinalIgnoreCase));
+        if (file is null && localized) {
+            // Fall back to whichever locale folder the client actually ships.
+            string suffix = $"/{fileName[(fileName.IndexOf('/') + 1)..]}";
+            file = xmlReader.Files
+                .FirstOrDefault(entry => entry.Name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (file is null) {
+            Console.WriteLine($"Table {path} not found in client data, skipping.");
+            yield break;
+        }
+
+        XmlNodeList? nodes = xmlReader.GetXmlDocument(file).SelectNodes($"ms2/{nodeName}");
+        if (nodes is null) {
+            yield break;
+        }
+
+        foreach (XmlNode node in nodes) {
+            yield return node;
+        }
+    }
+
+    private static IReadOnlyList<ItemComponent> ParseMaidIngredients(XmlNode node) {
+        var ingredients = new List<ItemComponent>(3);
+        foreach (string prefix in new[] { "First", "Second", "Third" }) {
+            ItemComponent? ingredient = ParseMaidIngredient(node, $"{prefix}IngredientItemID", $"{prefix}IngredientCount");
+            if (ingredient != null) {
+                ingredients.Add(ingredient);
+            }
+        }
+
+        return ingredients;
+    }
+
+    private static ItemComponent? ParseMaidIngredient(XmlNode node, string idAttribute, string countAttribute) {
+        string? value = node.Attributes?[idAttribute]?.Value;
+        if (string.IsNullOrWhiteSpace(value) || value == "0") {
+            return null;
+        }
+
+        // The field holds either a numeric item id or an ItemTag name (e.g. "CrystalPiece").
+        // Rarity is -1 because the recipe does not constrain it.
+        int amount = MaidInt(node, countAttribute, 1);
+        if (int.TryParse(value, out int itemId)) {
+            return new ItemComponent(itemId, Rarity: -1, amount, ItemTag.None);
+        }
+
+        return Enum.TryParse(value, out ItemTag tag)
+            ? new ItemComponent(ItemId: 0, Rarity: -1, amount, tag)
+            : null;
+    }
+
+    private static int[] ParseMaidIntList(string? value) {
+        if (string.IsNullOrWhiteSpace(value)) {
+            return [];
+        }
+
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(entry => int.TryParse(entry, out int result) ? result : 0)
+            .ToArray();
+    }
+
+    private static int MaidInt(XmlNode node, string attribute, int defaultValue = 0) {
+        string? value = node.Attributes?[attribute]?.Value;
+        return int.TryParse(value, out int result) ? result : defaultValue;
+    }
+    #endregion
 
     private static ItemComponent? ParseMasteryIngredient(IReadOnlyList<string> ingredientArray) {
         if (ingredientArray.Count == 0 || ingredientArray[0] == "0") {

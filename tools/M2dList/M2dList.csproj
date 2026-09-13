@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>12</LangVersion>
+        <AssemblyName>M2dList</AssemblyName>
+        <RootNamespace>Maple2.Tools.M2dList</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="Maple2.File.Parser.Tadeucci" Version="2.3.7" />
+    </ItemGroup>
+
+</Project>

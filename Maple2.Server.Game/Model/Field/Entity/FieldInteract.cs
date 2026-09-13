@@ -20,6 +20,13 @@ public class FieldInteract : FieldEntity<InteractObjectMetadata> {
     public InteractState State { get; private set; }
     public int SpawnId { get; init; }
 
+    /// <summary>
+    /// True when each player opens this on their own. A field treasure chest never changes for
+    /// anyone but the player who opened it, and that player never gets it back, so its state is
+    /// tracked on the character rather than here.
+    /// </summary>
+    public bool PerPlayer { get; init; }
+
     public FieldInteract(FieldManager field, int objectId, string entityId, InteractObjectMetadata value, IInteractObject interactObject) : base(field, objectId, value) {
         EntityId = entityId;
         State = InteractState.Normal;
@@ -34,6 +41,13 @@ public class FieldInteract : FieldEntity<InteractObjectMetadata> {
         }
 
         reactTick = Environment.TickCount64;
+
+        if (PerPlayer) {
+            // Nothing about the object changes: it stays there, closed and reactable, for every
+            // other character. Only the opener's client is told otherwise, and permanently.
+            return true;
+        }
+
         reactLimit--;
         if (reactLimit > 0) {
             SetState(InteractState.Normal);
@@ -62,7 +76,6 @@ public class FieldInteract : FieldEntity<InteractObjectMetadata> {
     }
 
     public override void Update(long tickCount) {
-        // TODO: Include treasure chests
         if (Object is InteractBillBoardObject billboard && DateTime.Now.ToEpochSeconds() > billboard.ExpirationTime) {
             SetState(InteractState.Hidden);
             Field.RemoveInteract(Object);

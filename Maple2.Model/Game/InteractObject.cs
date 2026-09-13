@@ -13,7 +13,13 @@ public interface IInteractObject : IByteSerializable {
 }
 
 public abstract class InteractObject<T> : IInteractObject where T : InteractObject {
-    public abstract InteractType Type { get; }
+    // Fallback implied by the placement entity kind (actor/mesh/display/...).
+    protected abstract InteractType DefaultType { get; }
+
+    // The behavior type comes from InteractObjectMetadata, not from the placement entity kind:
+    // e.g. treasure chests are placed as Ms2InteractActor but are Mesh objects to the client.
+    // Callers that have the metadata must set this; DefaultType is only the fallback.
+    public InteractType Type { get; init; }
 
     protected T Metadata { get; init; }
     public int Id { get; init; }
@@ -29,6 +35,8 @@ public abstract class InteractObject<T> : IInteractObject where T : InteractObje
         EntityId = entityId;
         Metadata = metadata;
         Id = metadata.InteractId;
+        // Overridden by an object initializer when the caller has metadata.
+        Type = DefaultType;
     }
 
     public virtual void WriteTo(IByteWriter writer) {
@@ -48,12 +56,12 @@ public abstract class InteractObject<T> : IInteractObject where T : InteractObje
 }
 
 public sealed class InteractMeshObject(string entityId, Ms2InteractMesh metadata) : InteractObject<Ms2InteractMesh>(entityId, metadata) {
-    public override InteractType Type => InteractType.Mesh;
+    protected override InteractType DefaultType => InteractType.Mesh;
 
 }
 
 public sealed class InteractTelescopeObject(string entityId, Ms2Telescope metadata) : InteractObject<Ms2Telescope>(entityId, metadata) {
-    public override InteractType Type => InteractType.Telescope;
+    protected override InteractType DefaultType => InteractType.Telescope;
 
 }
 
@@ -61,35 +69,35 @@ public sealed class InteractTelescopeObject(string entityId, Ms2Telescope metada
 // co_fi_funct_roulette_A01_
 // co_in_funct_extract_A01_
 public sealed class InteractUiObject(string entityId, Ms2SimpleUiObject metadata) : InteractObject<Ms2SimpleUiObject>(entityId, metadata) {
-    public override InteractType Type => InteractType.Ui;
+    protected override InteractType DefaultType => InteractType.Ui;
 
 }
 
 // public sealed class InteractWebObject : InteractObject<InteractObject> {
-//     public override InteractType Type => InteractType.Web;
+//     protected override InteractType DefaultType => InteractType.Web;
 //
 //     public InteractWebObject(string entityId, InteractObject metadata) : base(entityId, metadata) { }
 // }
 
 public sealed class InteractDisplayImage(string entityId, Ms2InteractDisplay metadata) : InteractObject<Ms2InteractDisplay>(entityId, metadata) {
-    public override InteractType Type => InteractType.DisplayImage;
+    protected override InteractType DefaultType => InteractType.DisplayImage;
 
 }
 
 public sealed class InteractGatheringObject(string entityId, Ms2InteractActor metadata) : InteractObject<Ms2InteractActor>(entityId, metadata) {
-    public override InteractType Type => InteractType.Gathering;
+    protected override InteractType DefaultType => InteractType.Gathering;
 
     public int Count;
 
 }
 
 public sealed class InteractGuildPosterObject(string entityId, Ms2InteractDisplay metadata) : InteractObject<Ms2InteractDisplay>(entityId, metadata) {
-    public override InteractType Type => InteractType.GuildPoster;
+    protected override InteractType DefaultType => InteractType.GuildPoster;
 
 }
 
 public sealed class InteractBillBoardObject : InteractObject<Ms2InteractMesh> {
-    public override InteractType Type => InteractType.BillBoard;
+    protected override InteractType DefaultType => InteractType.BillBoard;
 
     public long OwnerAccountId { get; init; }
     public long OwnerCharacterId { get; init; }
@@ -120,7 +128,7 @@ public sealed class InteractBillBoardObject : InteractObject<Ms2InteractMesh> {
 }
 
 // public sealed class InteractWatchTowerObject : InteractObject<InteractObject> {
-//     public override InteractType Type => InteractType.WatchTower;
+//     protected override InteractType DefaultType => InteractType.WatchTower;
 //
 //     public InteractWatchTowerObject(string entityId, InteractObject metadata) : base(entityId, metadata) { }
 // }

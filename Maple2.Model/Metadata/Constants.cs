@@ -116,9 +116,9 @@ public static class Constant {
     public const int HomeDecorationMaxLevel = 10;
     public const bool EnableRollEverywhere = false;
     public const bool HideHomeCommands = true;
-    public const int MaxAllowedLatency = 2000;
+    public const int MaxAllowedLatency = 10000;
     public const bool DebugTriggers = false; // Set to true to enable debug triggers. (It'll write triggers to files and load triggers from files instead of DB)
-    public const bool AllowUnicodeInNames = false; // Allow Unicode characters in character and guild names
+    public const bool AllowUnicodeInNames = true; // Allow Unicode characters in character and guild names
     public const bool MailQuestItems = false; // Mail quest item rewards if inventory is full
     public const int MaxClosetMaxCount = 5;
     public const int MaxClosetTabNameLength = 10;

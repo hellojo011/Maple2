@@ -86,6 +86,10 @@ public class FieldNpc : Actor<Npc> {
     public readonly SkillMetadata?[] Skills;
 
     public int SpawnPointId = 0;
+    /// <summary>Uid of the item this npc belongs to (pet item, maid contract, ...). Sent in FieldAddNpc.</summary>
+    public long OwnerItemUid;
+    /// <summary>Set when this npc is a maid standing on its contract cube.</summary>
+    public Maid? Maid;
     public bool IsCorpse { get; private set; }
     private long lastCorpseBroadcastTick;
     public Action<FieldNpc>? WorldBossDeathCallback { get; set; }
@@ -242,6 +246,35 @@ public class FieldNpc : Actor<Npc> {
         MovementState.KeyframeEvent(keyName);
     }
 
+    private Vector3 RandomWalkDestination() {
+        if (Maid is null) {
+            return Navigation?.GetRandomPatrolPoint() ?? Position;
+        }
+
+        if (Navigation is null) {
+            // Placed on a cube deck the navmesh does not cover, so walk the cube tops instead.
+            IList<Vector3> spots = Field.StandingSpotsAt(Position);
+            return spots.Count > 0 ? spots[Random.Shared.Next(spots.Count)] : Position;
+        }
+
+        // A maid roams the house it was placed in. Take walkable points from the navmesh so
+        // it keeps to real ground, and drop the ones outside the plot, inside a cube such as
+        // water or a wall, or at another height than the pad it was placed on. Staying put is
+        // fine when nothing suitable turns up.
+        for (int i = 0; i < 8; i++) {
+            Vector3 candidate = Navigation.GetRandomPatrolPoint();
+            if (Math.Abs(candidate.Z - Origin.Z) > Constant.BlockSize / 2f) {
+                continue;
+            }
+
+            if (Field.IsFreeStandingSpot(candidate)) {
+                return candidate;
+            }
+        }
+
+        return Position;
+    }
+
     private NpcTask? NextRoutine(long tickCount) {
         if (Patrol?.WayPoints.Count > 0 && Navigation is not null) {
             return NextWaypoint();
@@ -261,7 +294,7 @@ public class FieldNpc : Actor<Npc> {
                 return MovementState.TryEmote(sequence.Name, true);
             case not null when routineName.StartsWith("Walk_"):
             case not null when routineName.StartsWith("Run_"):
-                return MovementState.TryMoveTo(Navigation?.GetRandomPatrolPoint() ?? Position, false, sequence.Name);
+                return MovementState.TryMoveTo(RandomWalkDestination(), false, sequence.Name);
             case not null:
                 if (!Value.Animations.TryGetValue(routineName, out AnimationSequenceMetadata? animationSequence)) {
                     break;

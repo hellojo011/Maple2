@@ -11,6 +11,7 @@ public record Ms2TriggerActor(
 : Ms2Trigger(TriggerId, Visible);
 
 public record Ms2TriggerAgent(
+    Vector3 Position,
     int TriggerId,
     bool Visible)
 : Ms2Trigger(TriggerId, Visible);

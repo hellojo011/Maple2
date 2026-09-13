@@ -41,10 +41,28 @@ public class InteractObjectHandler : FieldPacketHandler {
     private void HandleEnd(GameSession session, IByteReader packet) {
         string entityId = packet.ReadString();
 
-        if (session.Field?.TryGetInteract(entityId, out FieldInteract? interact) == true && interact.React()) {
+        if (session.Field?.TryGetInteract(entityId, out FieldInteract? interact) != true) {
+            return;
+        }
+
+        // A golden chest is opened once per character and then stays open for them. Unlock
+        // already records the ids that trophies count, and each chest is its own object.
+        if (interact.PerPlayer && session.Player.Value.Unlock.InteractedObjects.Contains(interact.Value.Id)) {
+            // The client can miss the state sent while it was still loading the field, which
+            // leaves it showing a chest that offers a prompt and then does nothing. Correct it
+            // here so the first attempt puts it right.
+            session.Send(InteractObjectPacket.Update(interact, InteractState.Normal));
+            return;
+        }
+
+        if (interact.React()) {
             session.ConditionUpdate(ConditionType.interact_object, codeLong: interact.Object.Id);
             session.ConditionUpdate(ConditionType.interact_object_rep, codeLong: interact.Object.Id);
             session.Buffs.TriggerEvent(session.Player, session.Player, session.Player, EventConditionType.OnInvestigate);
+
+            if (interact.PerPlayer) {
+                session.Player.Value.Unlock.InteractedObjects.Add(interact.Value.Id);
+            }
 
             switch (interact.Value.Type) {
                 case InteractType.Mesh:
@@ -77,6 +95,15 @@ public class InteractObjectHandler : FieldPacketHandler {
                     }
                     break;
             }
+
+            if (interact.PerPlayer) {
+                // Only this client is told the object is used up, so it stands open and stops
+                // offering the prompt while it stays closed for everyone else. It goes after
+                // the interact packet, which would otherwise leave the animation on top of it.
+                session.Send(InteractObjectPacket.Update(interact, InteractState.Normal));
+            }
+
+            session.Field.SpawnInteractNpcs(interact);
 
             ICollection<Item> items = new List<Item>();
             if (interact.Value.Drop.IndividualDropBoxIds.Length > 0) {

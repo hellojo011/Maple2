@@ -13,6 +13,7 @@ public partial class MovementState {
         MoveTo,
         ToTarget,
         FromTarget,
+        Direct,
     }
 
     private Vector3 walkDirection;
@@ -79,14 +80,51 @@ public partial class MovementState {
         UpdateDebugMarker(actor.Navigation.GetAgentPosition(), debugAgent, tickCount);
     }
 
+    /// <summary>
+    /// Straight-line walk for an npc with no navmesh agent, such as a maid standing on a
+    /// housing cube deck the navmesh was never baked over. There is nothing to path around at
+    /// that height, so the actor just heads for the target.
+    /// </summary>
+    private void StateWalkDirectUpdate(long tickCount, float delta) {
+        Vector3 offset = walkTargetPosition - actor.Position;
+        float distance = offset.Length();
+        float tickDistance = delta * Speed;
+
+        if (distance <= tickDistance) {
+            actor.Position = walkTargetPosition;
+            Velocity = new Vector3(0, 0, 0);
+
+            if (walkLookWhenDone && distance > 0) {
+                actor.Transform.LookTo(Vector3.Normalize(offset));
+            }
+
+            walkTask?.Completed();
+            return;
+        }
+
+        walkDirection = (1 / distance) * offset;
+        actor.Transform.LookTo(walkDirection);
+
+        Velocity = Speed * walkDirection;
+        actor.Position += tickDistance * walkDirection;
+
+        UpdateDebugMarker(actor.Position, debugNpc, tickCount);
+        UpdateDebugMarker(walkTargetPosition, debugTarget, tickCount);
+    }
+
     private void StateWalkUpdate(long tickCount, long tickDelta) {
+        UpdateMoveSpeed(speedOverride);
+
+        float delta = (float) tickDelta / 1000;
+        if (walkType == WalkType.Direct) {
+            StateWalkDirectUpdate(tickCount, delta);
+            return;
+        }
+
         if (actor.Navigation is null) {
             return;
         }
 
-        UpdateMoveSpeed(speedOverride);
-
-        float delta = (float) tickDelta / 1000;
         if (walkType == WalkType.Direction) {
             StateWalkDirectionUpdate(tickCount, tickDelta, delta);
             return;

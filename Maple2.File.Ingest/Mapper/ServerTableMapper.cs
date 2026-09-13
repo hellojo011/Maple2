@@ -1,6 +1,7 @@
 ﻿using Maple2.Database.Extensions;
 using Maple2.File.Ingest.Utils;
 using Maple2.File.IO;
+using Maple2.File.IO.Crypto.Common;
 using Maple2.File.Parser;
 using Maple2.File.Parser.Enum;
 using Maple2.File.Parser.Flat.Convert;
@@ -35,9 +36,11 @@ namespace Maple2.File.Ingest.Mapper;
 
 public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
     private readonly ServerTableParser parser;
+    private readonly M2dReader xmlReader;
 
     public ServerTableMapper(M2dReader xmlReader) {
         parser = new ServerTableParser(xmlReader);
+        this.xmlReader = xmlReader;
     }
 
     protected override IEnumerable<ServerTableMetadata> Map() {
@@ -138,7 +141,131 @@ public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
             Table = ParseConstants(),
         };
 
+        // Maid
+        yield return new ServerTableMetadata {
+            Name = ServerTableNames.MAID_GRADE_INFO,
+            Table = ParseMaidGradeInfo(),
+        };
+        yield return new ServerTableMetadata {
+            Name = ServerTableNames.MAID_RECIPE_SVR,
+            Table = ParseMaidRecipeSvr(),
+        };
     }
+
+    #region Maid
+    // No parser support in Maple2.File.Parser for these two, so they are read straight
+    // out of the archive.
+    private MaidGradeInfoTable ParseMaidGradeInfo() {
+        var results = new Dictionary<int, MaidGradeInfoTable.Entry>();
+        foreach (XmlNode node in SelectServerTableNodes("MaidGradeInfo.xml", "Grade")) {
+            int grade = MaidInt(node, "Grade");
+            results[grade] = new MaidGradeInfoTable.Entry(
+                Grade: grade,
+                JackpotRate: MaidFloat(node, "JackpotRate", 1f),
+                MoodNormalRate: MaidFloat(node, "FeelNormalRate", 1f),
+                MoodGoodRate: MaidFloat(node, "FeelGoodRate", 1f),
+                MoodVeryGoodRate: MaidFloat(node, "FeelVeryGoodRate", 1f));
+        }
+
+        return new MaidGradeInfoTable(results);
+    }
+
+    private MaidRecipeSvrTable ParseMaidRecipeSvr() {
+        var results = new Dictionary<int, MaidRecipeSvrTable.Entry>();
+        foreach (XmlNode node in SelectServerTableNodes("MaidRecipeSvr.xml", "recipe")) {
+            // Recipes are listed once globally and again per locale that overrides them.
+            // The locale rows come last, so the applicable one wins.
+            if (!M2dXmlGenerator.FeatureLocaleFilter.HasLocale(node.Attributes?["locale"]?.Value ?? string.Empty)) {
+                continue;
+            }
+
+            int id = MaidInt(node, "Id");
+            results[id] = new MaidRecipeSvrTable.Entry(
+                Id: id,
+                Ingredients: ParseMaidIngredients(node),
+                WorkbenchType: MaidInt(node, "WorkbenchType"),
+                LeadTimeNormal: MaidInt(node, "LeadTimeNormal"),
+                LeadTimeGood: MaidInt(node, "LeadTimeGood"),
+                LeadTimeVeryGood: MaidInt(node, "LeadTimeVeryGood"),
+                MaidExp: MaidInt(node, "MaidExp"),
+                Product: new ItemComponent(
+                    ItemId: MaidInt(node, "ProductItemID"),
+                    Rarity: MaidInt(node, "ProductRank", 1),
+                    Amount: MaidInt(node, "ProductCount", 1),
+                    Tag: ItemTag.None),
+                Jackpot: new ItemComponent(
+                    ItemId: MaidInt(node, "JackpotItemID"),
+                    Rarity: MaidInt(node, "JackpotRank", 1),
+                    Amount: MaidInt(node, "JackpotCount", 1),
+                    Tag: ItemTag.None),
+                JackpotRate: MaidFloat(node, "JackpotRate"),
+                JackpotMood: MaidInt(node, "JackpotMood"),
+                ImmediatelyCompleteFee: MaidInt(node, "ImmediatelyCompleteFee"));
+        }
+
+        return new MaidRecipeSvrTable(results);
+    }
+
+    private IEnumerable<XmlNode> SelectServerTableNodes(string fileName, string nodeName) {
+        string path = $"table/Server/{fileName}";
+        PackFileEntry? file = xmlReader.Files
+            .FirstOrDefault(entry => entry.Name.Equals(path, StringComparison.OrdinalIgnoreCase));
+        if (file is null) {
+            Console.WriteLine($"Table {path} not found in client data, skipping.");
+            yield break;
+        }
+
+        XmlNodeList? nodes = xmlReader.GetXmlDocument(file).SelectNodes($"ms2/{nodeName}");
+        if (nodes is null) {
+            yield break;
+        }
+
+        foreach (XmlNode node in nodes) {
+            yield return node;
+        }
+    }
+
+    private static IReadOnlyList<ItemComponent> ParseMaidIngredients(XmlNode node) {
+        var ingredients = new List<ItemComponent>(3);
+        foreach (string prefix in new[] { "First", "Second", "Third" }) {
+            ItemComponent? ingredient = ParseMaidIngredient(node, $"{prefix}IngredientItemID", $"{prefix}IngredientCount");
+            if (ingredient != null) {
+                ingredients.Add(ingredient);
+            }
+        }
+
+        return ingredients;
+    }
+
+    private static ItemComponent? ParseMaidIngredient(XmlNode node, string idAttribute, string countAttribute) {
+        string? value = node.Attributes?[idAttribute]?.Value;
+        if (string.IsNullOrWhiteSpace(value) || value == "0") {
+            return null;
+        }
+
+        // The field holds either a numeric item id or an ItemTag name (e.g. "CrystalPiece").
+        // Rarity is -1 because the recipe does not constrain it.
+        int amount = MaidInt(node, countAttribute, 1);
+        if (int.TryParse(value, out int itemId)) {
+            return new ItemComponent(itemId, Rarity: -1, amount, ItemTag.None);
+        }
+
+        return Enum.TryParse(value, out ItemTag tag)
+            ? new ItemComponent(ItemId: 0, Rarity: -1, amount, tag)
+            : null;
+    }
+
+    private static int MaidInt(XmlNode node, string attribute, int defaultValue = 0) {
+        string? value = node.Attributes?[attribute]?.Value;
+        return int.TryParse(value, out int result) ? result : defaultValue;
+    }
+
+    private static float MaidFloat(XmlNode node, string attribute, float defaultValue = 0f) {
+        string? value = node.Attributes?[attribute]?.Value;
+        return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out float result) ? result : defaultValue;
+    }
+    #endregion
+
 
     private InstanceFieldTable ParseInstanceField() {
         var results = new Dictionary<int, InstanceFieldMetadata>();
@@ -206,8 +333,8 @@ public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
                     Type: ScriptType.Npc,
                     Maid: new ScriptConditionMetadata.MaidData(
                         Authority: scriptCondition.maid_auth,
-                        Expired: scriptCondition.maid_expired != "!1",
-                        ReadyToPay: scriptCondition.maid_ready_to_pay != "!1",
+                        Expired: ParseToIntKeyValuePair(scriptCondition.maid_expired),
+                        ReadyToPay: ParseToIntKeyValuePair(scriptCondition.maid_ready_to_pay),
                         ClosenessRank: scriptCondition.maid_affinity_grade,
                         ClosenessTime: ParseToIntKeyValuePair(scriptCondition.maid_affinity_time),
                         MoodTime: ParseToIntKeyValuePair(scriptCondition.maid_mood_time),
@@ -269,8 +396,8 @@ public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
                     Type: ScriptType.Quest,
                     Maid: new ScriptConditionMetadata.MaidData(
                         Authority: scriptCondition.maid_auth,
-                        Expired: scriptCondition.maid_expired != "!1",
-                        ReadyToPay: scriptCondition.maid_ready_to_pay != "!1",
+                        Expired: ParseToIntKeyValuePair(scriptCondition.maid_expired),
+                        ReadyToPay: ParseToIntKeyValuePair(scriptCondition.maid_ready_to_pay),
                         ClosenessRank: scriptCondition.maid_affinity_grade,
                         ClosenessTime: ParseToIntKeyValuePair(scriptCondition.maid_affinity_time),
                         MoodTime: ParseToIntKeyValuePair(scriptCondition.maid_mood_time),
@@ -1812,6 +1939,14 @@ public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
         }
     }
 
+    /// <summary>
+    /// The meret market is server-side only: shop_merat_custom.xml is not from the client, it
+    /// was written for the emulator because the real shop_merat.xml is too old to use. Adding
+    /// items would mean repacking Server.m2d, so a loose file next to it is merged on top,
+    /// using the same format. Ids that already exist are replaced.
+    /// </summary>
+    private const string MeretMarketOverridePath = "Custom/shop_merat_custom.xml";
+
     private MeretMarketTable ParseMeretCustomShop() {
         var results = new Dictionary<int, MeretMarketItemMetadata>();
         foreach ((int id, ShopMeretCustom entry) in parser.ParseShopMeretCustom()) {
@@ -1820,6 +1955,14 @@ public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
             }
             results.Add(id, ParseMarketItemMetadata(entry));
         }
+
+        foreach (ShopMeretCustom entry in ParseMeretCustomShopOverride()) {
+            foreach (ShopMeretCustom addQuantity in entry.additionalQuantity) {
+                results[addQuantity.id] = ParseMarketItemMetadata(addQuantity, entry);
+            }
+            results[entry.id] = ParseMarketItemMetadata(entry);
+        }
+
         return new MeretMarketTable(results);
 
         MeretMarketItemMetadata ParseMarketItemMetadata(ShopMeretCustom item, ShopMeretCustom? parent = null) {
@@ -1858,6 +2001,99 @@ public class ServerTableMapper : TypeMapper<ServerTableMetadata> {
                 PromoStartTime: string.IsNullOrEmpty(promoStartTime) ? 0 : DateTime.ParseExact(promoStartTime, "yyyy-MM-dd-HH-mm-ss", CultureInfo.InvariantCulture).ToEpochSeconds(),
                 PromoEndTime: string.IsNullOrEmpty(promoEndTime) ? 0 : DateTime.ParseExact(promoEndTime, "yyyy-MM-dd-HH-mm-ss", CultureInfo.InvariantCulture).ToEpochSeconds());
         }
+    }
+
+    /// <summary>
+    /// Reads the loose meret market file, if there is one. The attributes are read one by one
+    /// rather than deserialized, because the format leaves numeric attributes empty the way the
+    /// file in the archive does (salePrice="") and XmlSerializer rejects that.
+    /// </summary>
+    private static IEnumerable<ShopMeretCustom> ParseMeretCustomShopOverride() {
+        string? root = Environment.GetEnvironmentVariable("MS2_DATA_FOLDER");
+        if (string.IsNullOrEmpty(root)) {
+            yield break;
+        }
+
+        string path = Path.Combine(root, MeretMarketOverridePath);
+        if (!System.IO.File.Exists(path)) {
+            yield break;
+        }
+
+        var document = new XmlDocument();
+        document.Load(path);
+        XmlNodeList? items = document.SelectNodes("ms2/item");
+        if (items is null) {
+            yield break;
+        }
+
+        int count = 0;
+        foreach (XmlNode item in items) {
+            ShopMeretCustom entry = ReadMeretCustomItem(item);
+            XmlNodeList? children = item.SelectNodes("additionalQuantity");
+            if (children is not null) {
+                foreach (XmlNode child in children) {
+                    entry.additionalQuantity.Add(ReadMeretCustomItem(child));
+                }
+            }
+
+            count++;
+            yield return entry;
+        }
+
+        Console.WriteLine($"Merged {count} meret market items from {path}");
+    }
+
+    private static ShopMeretCustom ReadMeretCustomItem(XmlNode node) {
+        return new ShopMeretCustom {
+            // Only XmlSerializer fills this, so an item built by hand starts with none.
+            additionalQuantity = [],
+            id = XmlInt(node, "id"),
+            tabID = XmlInt(node, "tabID"),
+            banner = XmlString(node, "banner"),
+            bannerTag = XmlInt(node, "bannerTag"),
+            itemID = XmlInt(node, "itemID"),
+            grade = XmlInt(node, "grade", 1),
+            quantity = XmlInt(node, "quantity", 1),
+            bonusQuantity = XmlInt(node, "bonusQuantity"),
+            durationDay = XmlInt(node, "durationDay"),
+            saleTag = (byte) XmlInt(node, "saleTag"),
+            paymentType = XmlInt(node, "paymentType"),
+            price = XmlInt(node, "price"),
+            salePrice = XmlInt(node, "salePrice"),
+            saleStartTime = XmlString(node, "saleStartTime"),
+            saleEndTime = XmlString(node, "saleEndTime"),
+            jobRequire = XmlIntList(node, "jobRequire"),
+            noRestock = XmlBool(node, "noRestock"),
+            minLevel = (short) XmlInt(node, "minLevel"),
+            maxLevel = (short) XmlInt(node, "maxLevel"),
+            achieveID = XmlInt(node, "achieveID"),
+            achieveGrade = (byte) XmlInt(node, "achieveGrade"),
+            pcCafe = XmlBool(node, "pcCafe"),
+            giftable = XmlBool(node, "giftable"),
+            showSaleTime = XmlBool(node, "showSaleTime"),
+            promoName = XmlString(node, "promoName"),
+            promoSaleStartTime = XmlString(node, "promoSaleStartTime"),
+            promoSaleEndTime = XmlString(node, "promoSaleEndTime"),
+        };
+    }
+
+    private static string XmlString(XmlNode node, string attribute) {
+        return node.Attributes?[attribute]?.Value ?? string.Empty;
+    }
+
+    private static int XmlInt(XmlNode node, string attribute, int defaultValue = 0) {
+        return int.TryParse(XmlString(node, attribute), out int value) ? value : defaultValue;
+    }
+
+    private static bool XmlBool(XmlNode node, string attribute) {
+        return XmlInt(node, attribute) != 0;
+    }
+
+    private static int[] XmlIntList(XmlNode node, string attribute) {
+        return XmlString(node, attribute)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(entry => int.TryParse(entry, out int value) ? value : 0)
+            .ToArray();
     }
 
     private FishTable ParseFish() {

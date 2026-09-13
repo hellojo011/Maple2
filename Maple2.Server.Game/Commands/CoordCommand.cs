@@ -54,7 +54,7 @@ public class CoordCommand : GameCommand {
         }
 
         ctx.Console.Out.WriteLine($"Moving to '{newPos}'");
-        session.Send(PortalPacket.MoveByPortal(session.Player, newPos, session.Player.Rotation));
+        session.SendMoveByPortal(PortalPacket.MoveByPortal(session.Player, newPos, session.Player.Rotation));
         ctx.ExitCode = 0;
         return;
 

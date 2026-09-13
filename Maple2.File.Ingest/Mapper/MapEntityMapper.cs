@@ -137,6 +137,13 @@ public class MapEntityMapper : TypeMapper<MapEntity> {
                     if (trigger != null) {
                         yield return trigger;
                     }
+                    // MS2TriggerCube is a trigger object *and* a physx prop, so this case runs before
+                    // the IMS2MapProperties one below and would otherwise swallow an object weapon
+                    // placed on it (the cannon bombs in 52000120_qd).
+                    MapEntity? triggerWeapon = ParseObjectWeapon(xblock, triggerObject, ObjectWeaponGuid(new Guid(entity.EntityId)));
+                    if (triggerWeapon != null) {
+                        yield return triggerWeapon;
+                    }
                     continue;
                 case IMS2RegionSkill skill:
                     yield return new MapEntity(xblock, new Guid(entity.EntityId), entity.EntityName) {
@@ -181,15 +188,9 @@ public class MapEntityMapper : TypeMapper<MapEntity> {
                     switch (mapProperties) {
                         case IMS2PhysXProp physXProp:
                             if (mapProperties.IsObjectWeapon) {
-                                int[] itemIds = physXProp.ObjectWeaponItemCode.Split(',').Select(int.Parse).ToArray();
-                                if (physXProp.ObjectWeaponSpawnNpcCode == 0) {
-                                    yield return new MapEntity(xblock, new Guid(entity.EntityId), entity.EntityName) {
-                                        Block = new ObjectWeapon(itemIds, (int) physXProp.ObjectWeaponRespawnTick, physXProp.ObjectWeaponActiveDistance, physXProp.Position, physXProp.Rotation),
-                                    };
-                                } else {
-                                    yield return new MapEntity(xblock, new Guid(entity.EntityId), entity.EntityName) {
-                                        Block = new ObjectWeapon(itemIds, (int) physXProp.ObjectWeaponRespawnTick, physXProp.ObjectWeaponActiveDistance, physXProp.Position, physXProp.Rotation, (int) physXProp.ObjectWeaponSpawnNpcCode, (int) physXProp.ObjectWeaponSpawnNpcCount, physXProp.ObjectWeaponSpawnNpcRate, (int) physXProp.ObjectWeaponSpawnNpcLifeTick),
-                                    };
+                                MapEntity? weapon = ParseObjectWeapon(xblock, physXProp, new Guid(entity.EntityId));
+                                if (weapon != null) {
+                                    yield return weapon;
                                 }
                                 continue;
                             }
@@ -251,6 +252,31 @@ public class MapEntityMapper : TypeMapper<MapEntity> {
 
     }
 
+    private static MapEntity? ParseObjectWeapon(string xblock, IMapEntity entity, Guid guid) {
+        if (entity is not IMS2PhysXProp { IsObjectWeapon: true } physXProp || string.IsNullOrWhiteSpace(physXProp.ObjectWeaponItemCode)) {
+            return null;
+        }
+
+        int[] itemIds = physXProp.ObjectWeaponItemCode.Split(',').Select(int.Parse).ToArray();
+        ObjectWeapon weapon = physXProp.ObjectWeaponSpawnNpcCode == 0
+            ? new ObjectWeapon(itemIds, (int) physXProp.ObjectWeaponRespawnTick, physXProp.ObjectWeaponActiveDistance, physXProp.Position, physXProp.Rotation)
+            : new ObjectWeapon(itemIds, (int) physXProp.ObjectWeaponRespawnTick, physXProp.ObjectWeaponActiveDistance, physXProp.Position, physXProp.Rotation, (int) physXProp.ObjectWeaponSpawnNpcCode, (int) physXProp.ObjectWeaponSpawnNpcCount, physXProp.ObjectWeaponSpawnNpcRate, (int) physXProp.ObjectWeaponSpawnNpcLifeTick);
+
+        return new MapEntity(xblock, guid, entity.EntityName) {
+            Block = weapon,
+        };
+    }
+
+    // An entity that is both a trigger object and an object weapon needs two rows, but (xblock, guid)
+    // is the primary key. Object weapons are only ever looked up by position, so give the weapon row a
+    // derived guid instead of the entity's own.
+    private static Guid ObjectWeaponGuid(Guid entityGuid) {
+        Span<byte> bytes = stackalloc byte[16];
+        entityGuid.TryWriteBytes(bytes);
+        bytes[15] ^= 0xFF;
+        return new Guid(bytes);
+    }
+
     private MapEntity? ParseTrigger(string xblock, IMS2TriggerObject trigger) {
         switch (trigger) {
             case IMS2TriggerActor actor:
@@ -259,7 +285,7 @@ public class MapEntityMapper : TypeMapper<MapEntity> {
                 };
             case IMS2TriggerAgent agent:
                 return new MapEntity(xblock, new Guid(trigger.EntityId), trigger.EntityName) {
-                    Block = new Ms2TriggerAgent(agent.TriggerObjectID, agent.IsVisible),
+                    Block = new Ms2TriggerAgent(agent.Position, agent.TriggerObjectID, agent.IsVisible),
                 };
             case IMS2TriggerBlock block:
                 return null;

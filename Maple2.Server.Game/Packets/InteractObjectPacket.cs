@@ -23,10 +23,19 @@ public static class InteractObjectPacket {
     }
 
     public static ByteWriter Update(FieldInteract interact) {
+        return Update(interact, interact.State);
+    }
+
+    /// <summary>
+    /// Sends a state the object does not actually hold. A field treasure chest is opened per
+    /// player, so the one who opened it is told it is done while it stays reactable for
+    /// everyone else.
+    /// </summary>
+    public static ByteWriter Update(FieldInteract interact, InteractState state) {
         var pWriter = Packet.Of(SendOp.InteractObject);
         pWriter.Write<Command>(Command.Update);
         pWriter.WriteString(interact.EntityId);
-        pWriter.Write<InteractState>(interact.State);
+        pWriter.Write<InteractState>(state);
         pWriter.Write<InteractType>(interact.Type);
 
         return pWriter;

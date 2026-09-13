@@ -44,6 +44,7 @@ public sealed class Ms2Context(DbContextOptions options) : DbContext(options) {
     internal DbSet<Marriage> Marriage { get; set; } = null!;
     internal DbSet<WeddingHall> WeddingHall { get; set; } = null!;
     internal DbSet<Nurturing> Nurturing { get; set; } = null!;
+    internal DbSet<Maid> Maid { get; set; } = null!;
     internal DbSet<DungeonRecord> DungeonRecord { get; set; } = null!;
     internal DbSet<PlayerReport> PlayerReports { get; set; } = null!;
     internal DbSet<Ban> Ban { get; set; } = null!;
@@ -81,6 +82,7 @@ public sealed class Ms2Context(DbContextOptions options) : DbContext(options) {
         modelBuilder.Entity<Marriage>(Maple2.Database.Model.Marriage.Configure);
         modelBuilder.Entity<WeddingHall>(Maple2.Database.Model.WeddingHall.Configure);
         modelBuilder.Entity<Nurturing>(Maple2.Database.Model.Nurturing.Configure);
+        modelBuilder.Entity<Maid>(Maple2.Database.Model.Maid.Configure);
 
         modelBuilder.Entity<MesoListing>(MesoListing.Configure);
         modelBuilder.Entity<SoldMesoListing>(SoldMesoListing.Configure);

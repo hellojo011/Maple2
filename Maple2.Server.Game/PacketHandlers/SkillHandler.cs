@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using Maple2.Database.Storage;
 using Maple2.Model.Enum;
+using Maple2.Model.Game;
 using Maple2.Model.Metadata;
 using Maple2.PacketLib.Tools;
 using Maple2.Server.Core.Constants;
@@ -13,6 +14,7 @@ using Maple2.Server.Game.Packets;
 using Maple2.Server.Game.Session;
 using Maple2.Server.Game.Util;
 using Maple2.Tools.Collision;
+
 
 namespace Maple2.Server.Game.PacketHandlers;
 
@@ -82,6 +84,9 @@ public class SkillHandler : FieldPacketHandler {
         if (session.HeldLiftup != null) {
             if (session.HeldLiftup.SkillId == skillId && session.HeldLiftup.Level == level) {
                 session.HeldLiftup = null;
+	        session.Scheduler.Schedule(() => {
+        	    session.Field?.Broadcast(CubePacket.LiftupDrop(session.Player));
+		}, TimeSpan.FromMilliseconds(500));
             } else {
                 // Cannot use other skills while holding LiftupWeapon.
                 return;
@@ -124,7 +129,7 @@ public class SkillHandler : FieldPacketHandler {
         session.Player.InBattle = record.Metadata.State.InBattle;
         session.Player.ActiveSkills.Add(record);
         session.Field.Broadcast(SkillPacket.Use(record));
-        session.Field.Broadcast(StatsPacket.Init(session.Player));
+        // session.Field.Broadcast(StatsPacket.Update(session.Player));
 
         session.Player.ApplyEffects(record.Metadata.Data.Skills, session.Player, session.Player, EventConditionType.Activate, skillId: record.SkillId, targets: [session.Player]);
         session.Buffs.TriggerEvent(session.Player, session.Player, session.Player, EventConditionType.OnSkillCasted, skillId: record.SkillId);

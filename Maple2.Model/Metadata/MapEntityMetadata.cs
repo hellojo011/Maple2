@@ -14,6 +14,7 @@ public class MapEntityMetadata {
     public required IReadOnlyList<SpawnPointPC> PlayerSpawns { get; init; }
     public required IReadOnlyList<SpawnPointNPC> NpcSpawns { get; init; }
     public required IReadOnlyDictionary<int, Ms2RegionSpawn> RegionSpawns { get; init; }
+    public required IReadOnlyList<FieldChestSpawn> ChestSpawns { get; init; }
     public required IReadOnlyList<Ms2RegionSkill> RegionSkills { get; init; }
     public required IReadOnlyList<Ms2CubeSkill> CubeSkills { get; init; }
     public required IReadOnlyDictionary<int, EventSpawnPointNPC> EventNpcSpawns { get; init; }

@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using Maple2.Model.Enum;
 using Maple2.Model.Metadata;
 using Maple2.Server.Game.Model.Skill;
 using Maple2.Server.Game.Packets;
@@ -51,8 +52,13 @@ public class SkillState {
                     //     };
                     //     targets.Add(targetRecord);
                     // }
-                    if (attackTargets.Count > targetIndex) {
-                        // if attack.direction == 3, use direction to target, if attack.direction == 0, use rotation maybe?
+                    if (attack.Arrow.NonTarget != SkillTargetType.None) {
+                        // A non-target arrow flies straight out along the caster's facing. The wall archers in
+                        // 52000120_qd (skill 49286011) do this on the reference server: the shot direction always
+                        // equals their front axis, even while they have an enemy somewhere to the side.
+                        cast.Position = actor.Position;
+                        cast.Direction = actor.Transform.FrontAxis;
+                    } else if (attackTargets.Count > targetIndex) {
                         cast.Position = actor.Position;
                         cast.Direction = Vector3.Normalize(attackTargets[targetIndex].Position - actor.Position);
                     }

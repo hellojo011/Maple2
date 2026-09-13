@@ -49,9 +49,20 @@ public sealed partial class GameSession : Core.Network.Session {
     public int ClientTick;
 
     public int Latency;
+    private byte stateSyncNumber;
     public string PlayerName => Player.Value.Character.Name;
     public Guid MachineId { get; private set; }
     private bool preMigrationSaved;
+
+    /// <summary>
+    /// Sends a teleport to the client together with the state sync counter that belongs to it.
+    /// The client stamps its own position reports with this number, so without the bump it keeps
+    /// reporting from where it stood before the teleport and the camera anchors to the old spot.
+    /// </summary>
+    public void SendMoveByPortal(ByteWriter movePacket) {
+        Send(movePacket);
+        Send(StateSyncPacket.SyncNumber(unchecked(++stateSyncNumber)));
+    }
 
     #region Autofac Autowired
     // ReSharper disable MemberCanBePrivate.Global
@@ -152,12 +163,20 @@ public sealed partial class GameSession : Core.Network.Session {
         db.BeginTransaction();
         int objectId = FieldManager.NextGlobalId();
         Player? player;
+		bool locked = false;
         try {
-            AcquireLock(AccountId, 5);
+            locked = AcquireLock(AccountId, 30);
+			if (!locked) {
+                Logger.Warning("Could not acquire lock for {AccountId}, aborting enter", AccountId);
+                Send(MigrationPacket.MoveResult(MigrationError.s_move_err_default));
+                return false;
+            }
             player = db.LoadPlayer(AccountId, CharacterId, objectId, GameServer.GetChannel());
             db.Commit();
         } finally {
-            ReleaseLock(AccountId);
+			if (locked) {
+				ReleaseLock(AccountId);
+			}
         }
         if (player == null) {
             Logger.Warning("Failed to load player from database: {AccountId}, {CharacterId}", AccountId, CharacterId);
@@ -304,7 +323,8 @@ public sealed partial class GameSession : Core.Network.Session {
         // Cash
         // Gvg
         // Pvp
-        Send(StateSyncPacket.SyncNumber(0));
+        stateSyncNumber = 0;
+        Send(StateSyncPacket.SyncNumber(stateSyncNumber));
         // SyncWorld
         Send(PrestigePacket.Load(player.Account));
         Send(PrestigePacket.LoadMissions(player.Account));
@@ -316,8 +336,11 @@ public sealed partial class GameSession : Core.Network.Session {
         // Send(QuestPacket.LoadKritiasMissions(Array.Empty<int>()));
         // Send(QuestPacket.LoadQuests(Array.Empty<int>()));
         Achievement.Load();
-        // MaidCraftItem
+        Send(MaidPacket.LoadCraft([]));
         // UserMaid
+        // No maids are persisted yet, so start empty; each one announces itself with
+        // UserMaid mode 1 when its contract cube spawns it into the field.
+        Send(MaidPacket.Load([]));
         // UserEnv
         Send(UserEnvPacket.LoadTitles(Player.Value.Unlock.Titles));
         Send(UserEnvPacket.InteractedObjects(Player.Value.Unlock.InteractedObjects));
@@ -751,7 +774,7 @@ public sealed partial class GameSession : Core.Network.Session {
         }
     }
 
-    private void AcquireLock(long accountId, int maxRetries = 3) {
+    private bool AcquireLock(long accountId, int maxRetries = 3) {
         int retryCount = 0;
         const int backoffMs = 500;
 
@@ -761,7 +784,7 @@ public sealed partial class GameSession : Core.Network.Session {
             });
 
             if (string.IsNullOrEmpty(response.Error)) {
-                return;
+                return true;
             }
 
             retryCount++;
@@ -769,6 +792,7 @@ public sealed partial class GameSession : Core.Network.Session {
         }
 
         Logger.Error("Failed to acquire lock for account {AccountId} after {MaxRetries} retries", accountId, maxRetries);
+		return false;
     }
 
     private void ReleaseLock(long accountId) {
@@ -898,25 +922,32 @@ public sealed partial class GameSession : Core.Network.Session {
     public void MigrationSave() {
         if (preMigrationSaved) return;
 
+		bool locked = false;
+
         try {
-            AcquireLock(AccountId, 5);
+            locked = AcquireLock(AccountId, 30);
             Save();
             preMigrationSaved = true;
         } catch (Exception ex) {
             Logger.Error(ex, "MigrationSave failed AccountId={AccountId} CharacterId={CharacterId}", AccountId, CharacterId);
         } finally {
-            ReleaseLock(AccountId);
+			if(locked) {
+			    ReleaseLock(AccountId);
+			}
         }
     }
 
     public void SessionSave() {
+		bool locked = false;
         try {
-            AcquireLock(AccountId, 5);
+            locked = AcquireLock(AccountId, 30);
             Save();
         } catch (Exception ex) {
             Logger.Error(ex, "SessionSave failed AccountId={AccountId} CharacterId={CharacterId}", AccountId, CharacterId);
         } finally {
-            ReleaseLock(AccountId);
+		    if(locked) {
+                ReleaseLock(AccountId);
+            }
         }
     }
 

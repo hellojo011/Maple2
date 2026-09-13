@@ -151,10 +151,13 @@ using var xmlReader = new M2dReader(xmlPath);
 using var exportedReader = new M2dReader(exportedPath);
 using var serverReader = new M2dReader(serverPath);
 
-string dataDbConnection = $"Server={server};Port={port};Database={database};User={user};Password={password};oldguids=true";
+string dataDbConnection = $"Server={server};Port={port};Database={database};User={user};Password={password};oldguids=true;DefaultCommandTimeout=0;ConnectionTimeout=60";
 
 DbContextOptions options = new DbContextOptionsBuilder()
-    .UseMySql(dataDbConnection, ServerVersion.AutoDetect(dataDbConnection)).Options;
+    .UseMySql(dataDbConnection, ServerVersion.AutoDetect(dataDbConnection), o => {
+	o.CommandTimeout(1800);
+	o.MaxBatchSize(50);
+	}).Options;
 
 Console.WriteLine("Connecting to metadata database...");
 using var metadataContext = new MetadataContext(options);

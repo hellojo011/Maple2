@@ -8,6 +8,10 @@ using Maple2.Tools.Collision;
 namespace Maple2.Database.Storage;
 
 public class MapEntityStorage(MetadataContext context) : MetadataStorage<string, MapEntityMetadata>(context, CACHE_SIZE) {
+    // Xblock entity names for the two treasure chest tiers.
+    private const string ChestNormalPrefix = "Chest_Normal_";
+    private const string ChestRarePrefix = "Chest_Rare_";
+
     private const int CACHE_SIZE = 1500; // ~1.1k total Maps
 
     private const float MAP_LIMIT = sbyte.MaxValue * 150f;
@@ -35,6 +39,7 @@ public class MapEntityStorage(MetadataContext context) : MetadataStorage<string,
             var playerSpawns = new List<SpawnPointPC>();
             var npcSpawns = new List<SpawnPointNPC>();
             var regionSpawns = new Dictionary<int, Ms2RegionSpawn>();
+            var chestSpawns = new List<FieldChestSpawn>();
             var regionSkills = new List<Ms2RegionSkill>();
             var cubeSkills = new List<Ms2CubeSkill>();
             var eventNpcSpawns = new Dictionary<int, EventSpawnPointNPC>();
@@ -68,6 +73,13 @@ public class MapEntityStorage(MetadataContext context) : MetadataStorage<string,
                         break;
                     case Ms2RegionSpawn regionSpawn:
                         regionSpawns[regionSpawn.Id] = regionSpawn;
+                        // Treasure chest spots are ordinary region spawns; only the entity name
+                        // tells them apart, and it does not survive into the block.
+                        if (entity.Name.StartsWith(ChestNormalPrefix, StringComparison.OrdinalIgnoreCase)) {
+                            chestSpawns.Add(new FieldChestSpawn(Rare: false, regionSpawn));
+                        } else if (entity.Name.StartsWith(ChestRarePrefix, StringComparison.OrdinalIgnoreCase)) {
+                            chestSpawns.Add(new FieldChestSpawn(Rare: true, regionSpawn));
+                        }
                         break;
                     case Ms2CubeSkill cubeSkill:
                         cubeSkills.Add(cubeSkill);
@@ -128,6 +140,7 @@ public class MapEntityStorage(MetadataContext context) : MetadataStorage<string,
                 EventNpcSpawns = eventNpcSpawns,
                 EventItemSpawns = eventItemSpawns,
                 RegionSpawns = regionSpawns,
+                ChestSpawns = chestSpawns,
                 RegionSkills = regionSkills,
                 CubeSkills = cubeSkills,
                 Taxi = taxi,

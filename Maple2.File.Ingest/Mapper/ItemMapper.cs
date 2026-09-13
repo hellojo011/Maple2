@@ -185,6 +185,7 @@ public class ItemMapper : TypeMapper<ItemMetadata> {
                     Collection: data.property.collection,
                     GearScore: data.property.gearScore,
                     PetId: data.pet.petID,
+                    MaidId: data.maid.maidID,
                     Ride: data.ride.rideMonster,
                     TradableCount: tradableCount,
                     TradableCountDeduction: tradableCountDeduction,

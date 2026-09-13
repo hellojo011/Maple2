@@ -2,12 +2,14 @@
 using Maple2.Model.Enum;
 using Maple2.Model.Game;
 using Maple2.Model.Metadata;
+using Maple2.Server.Game.Model;
 using Maple2.Server.Game.Session;
 
 namespace Maple2.Server.Game.Util;
 
 public static class NpcTalkUtil {
-    public static ScriptState? GetInitialScriptType(GameSession session, ScriptStateType type, ScriptMetadata? metadata, int npcId) {
+    public static ScriptState? GetInitialScriptType(GameSession session, ScriptStateType type, ScriptMetadata? metadata, FieldNpc npc) {
+        int npcId = npc.Value.Id;
         switch (type) {
             case ScriptStateType.Script:
                 if (metadata is null) {
@@ -40,11 +42,15 @@ public static class NpcTalkUtil {
                     }
 
                     if (!scriptConditions.TryGetValue(scriptState.Id, out ScriptConditionMetadata? scriptCondition)) {
-                        scriptStates.Add(scriptState);
+                        // Every owner facing maid branch is gated on maid_auth, so a branch
+                        // with no condition at all is the one a visitor sees.
+                        if (!IsMaidOwner(session, npc)) {
+                            scriptStates.Add(scriptState);
+                        }
                         continue;
                     }
 
-                    if (scriptCondition.ConditionCheck(session)) {
+                    if (scriptCondition.ConditionCheck(session, npc)) {
                         scriptStates.Add(scriptState);
                     }
                 }
@@ -73,11 +79,13 @@ public static class NpcTalkUtil {
                     }
 
                     if (!selectScriptConditions.TryGetValue(scriptState.Id, out ScriptConditionMetadata? scriptCondition)) {
-                        selectScriptStates.Add(scriptState);
+                        if (!IsMaidOwner(session, npc)) {
+                            selectScriptStates.Add(scriptState);
+                        }
                         continue;
                     }
 
-                    if (scriptCondition.ConditionCheck(session)) {
+                    if (scriptCondition.ConditionCheck(session, npc)) {
                         selectScriptStates.Add(scriptState);
                     }
                 }
@@ -139,7 +147,7 @@ public static class NpcTalkUtil {
         return true;
     }
 
-    public static bool ConditionCheck(this ScriptConditionMetadata scriptCondition, GameSession session) {
+    public static bool ConditionCheck(this ScriptConditionMetadata scriptCondition, GameSession session, FieldNpc? npc = null) {
         if (session.Field is null) return false;
         if (scriptCondition.JobCode.Count > 0 && !scriptCondition.JobCode.Contains(session.Player.Value.Character.Job.Code())) {
             return false;
@@ -223,7 +231,69 @@ public static class NpcTalkUtil {
             return false;
         }
 
+        if (!MeetsMaidCondition(session, npc, scriptCondition.Maid)) {
+            return false;
+        }
+
         return true;
+    }
+
+    /// <summary>
+    /// Maid dialogue is split into branches by these conditions, so leaving them unchecked
+    /// makes every branch match at once. Only the parts that can be derived from the maid
+    /// data we decode are enforced; the rest are ignored rather than guessed.
+    /// </summary>
+    private static bool MeetsMaidCondition(GameSession session, FieldNpc? npc, ScriptConditionMetadata.MaidData condition) {
+        bool checksMaid = condition.Authority
+                          || condition.Expired.Key > 0
+                          || condition.ReadyToPay.Key > 0
+                          || condition.ClosenessRank > 0
+                          || condition.ClosenessTime.Key > 0
+                          || condition.MoodTime.Key > 0
+                          || condition.DaysBeforeExpired.Key > 0;
+        if (!checksMaid) {
+            return true;
+        }
+
+        Maid? maid = npc?.Maid;
+        if (maid is null) {
+            // The script is asking about a maid but this npc is not one.
+            return false;
+        }
+
+        if (condition.Authority && session.AccountId != maid.AccountId) {
+            return false;
+        }
+
+        long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        if (condition.Expired.Key > 0 && now >= maid.ExpiryTime != condition.Expired.Value) {
+            return false;
+        }
+
+        if (condition.DaysBeforeExpired.Key > 0) {
+            long daysLeft = Math.Max(0, (maid.ExpiryTime - now) / (24 * 60 * 60));
+            if (daysLeft <= condition.DaysBeforeExpired.Key != condition.DaysBeforeExpired.Value) {
+                return false;
+            }
+        }
+
+        if (condition.ReadyToPay.Key > 0) {
+            // The contract can be renewed over its last MaidReadyToPay days, as the housing
+            // tool tells the player. Paying pushes the expiry out, which closes the window
+            // again on its own.
+            long window = session.ServerTableMetadata.ConstantsTable.MaidReadyToPay * 24L * 60 * 60;
+            if (now >= maid.ExpiryTime - window != condition.ReadyToPay.Value) {
+                return false;
+            }
+        }
+
+        // ClosenessRank, ClosenessTime and MoodTime need maid fields that are still
+        // undecoded, so they stay unchecked until those are identified.
+        return true;
+    }
+
+    private static bool IsMaidOwner(GameSession session, FieldNpc? npc) {
+        return npc?.Maid is not null && session.AccountId == npc.Maid.AccountId;
     }
 
     public static ScriptState? GetQuestScriptState(GameSession session, ScriptMetadata? scriptMetadata, int npcId) {

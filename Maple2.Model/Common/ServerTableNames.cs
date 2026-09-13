@@ -25,4 +25,8 @@ public static class ServerTableNames {
     public const string ENCHANT_OPTION = "enchantOption.xml";
     public const string UNLIMITED_ENCHANT_OPTION = "unlimitedEnchantOption.xml";
     public const string CONSTANTS = "constants.xml";
+
+    // Maid
+    public const string MAID_GRADE_INFO = "MaidGradeInfo.xml";
+    public const string MAID_RECIPE_SVR = "MaidRecipeSvr.xml";
 }

@@ -90,9 +90,9 @@ public class NpcTalkHandler : FieldPacketHandler {
         }
 
         ScriptMetadata.TryGet(npc.Value.Id, out ScriptMetadata? metadata);
-        ScriptState? scriptState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Script, metadata, npc.Value.Id);
-        ScriptState? selectState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Select, metadata, npc.Value.Id);
-        ScriptState? questState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Quest, metadata, npc.Value.Id);
+        ScriptState? scriptState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Script, metadata, npc);
+        ScriptState? selectState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Select, metadata, npc);
+        ScriptState? questState = NpcTalkUtil.GetInitialScriptType(session, ScriptStateType.Quest, metadata, npc);
 
         if (questState != null) {
             talkType |= NpcTalkType.Quest;

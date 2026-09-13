@@ -357,7 +357,7 @@ public class ItemCollectionTest {
     }
 
     private static Model.Game.Item CreateItem(int id, int rarity = 1, int amount = 1) {
-        var fakeProperty = new ItemMetadataProperty(false, 0, 100, 18, 0, string.Empty, string.Empty, ItemTag.None, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], false, 0, false, [], [], [], 0, 0);
+        var fakeProperty = new ItemMetadataProperty(false, 0, 100, 18, 0, string.Empty, string.Empty, ItemTag.None, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [], false, 0, false, [], [], [], 0, 0);
         var fakeCustomize = new ItemMetadataCustomize(0, 0);
         var fakeLimit = new ItemMetadataLimit(Gender.All, 0, 0, 4, true, true, true, true, true, false, false, 0, [], []);
         var fakeLife = new ItemMetadataLife(0, 0);

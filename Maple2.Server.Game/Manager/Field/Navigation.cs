@@ -1,4 +1,5 @@
 ﻿using System.Numerics;
+using DotRecast.Core.Numerics;
 using DotRecast.Detour;
 using DotRecast.Detour.Crowd;
 using DotRecast.Detour.Io;
@@ -19,6 +20,13 @@ public sealed class Navigation : IDisposable {
     private readonly DtNavMeshQuery navMeshQuery;
     public DtCrowd Crowd { get; private set; }
     private readonly DtCrowdAgentConfig crowdAgentConfig = new DtCrowdAgentConfig();
+
+    // MS2TriggerAgent is a one-block path blocker that trigger scripts switch on and off - three of them
+    // close the bridge in 52000120_qd while it is raised. The navmesh is prebaked, so a live agent disables
+    // the polygons under it instead; the crowd's query filter already excludes disabled polygons.
+    private static readonly RcVec3f AgentHalfExtents = new(0.75f, 1.5f, 0.75f);
+    private readonly HashSet<int> blockingAgents = [];
+    private readonly Dictionary<long, int> blockedPolys = [];
 
     public Navigation(string name) {
         Name = name;
@@ -69,7 +77,41 @@ public sealed class Navigation : IDisposable {
         return ap;
     }
 
+    public void SetAgentBlocking(int triggerId, Vector3 position, bool blocking) {
+        if (blocking ? !blockingAgents.Add(triggerId) : !blockingAgents.Remove(triggerId)) {
+            return;
+        }
+
+        // Match every polygon, including ones already disabled, so switching an agent off finds the same set.
+        var filter = new DtQueryDefaultFilter(SampleAreaModifications.SAMPLE_POLYFLAGS_ALL, 0, [1f, 10f, 1f, 1f, 2f, 1.5f]);
+        var polys = new List<long>();
+        navMeshQuery.QueryPolygons(DotRecastHelper.ToNavMeshSpace(position), AgentHalfExtents, filter, new PolyRefCollector(polys));
+
+        foreach (long polyRef in polys) {
+            // Neighbouring agents overlap the same polygons, so only reopen one when no agent covers it.
+            int count = blockedPolys.GetValueOrDefault(polyRef) + (blocking ? 1 : -1);
+            if (count > 0) {
+                blockedPolys[polyRef] = count;
+            } else {
+                blockedPolys.Remove(polyRef);
+            }
+
+            navMesh.GetPolyFlags(polyRef, out int flags);
+            navMesh.SetPolyFlags(polyRef, count > 0
+                ? flags | SampleAreaModifications.SAMPLE_POLYFLAGS_DISABLED
+                : flags & ~SampleAreaModifications.SAMPLE_POLYFLAGS_DISABLED);
+        }
+    }
+
     public void Dispose() {
 
+    }
+
+    private sealed class PolyRefCollector(List<long> polys) : IDtPolyQuery {
+        public void Process(DtMeshTile tile, DtPoly[] polyArray, Span<long> refs, int count) {
+            for (int i = 0; i < count; i++) {
+                polys.Add(refs[i]);
+            }
+        }
     }
 }

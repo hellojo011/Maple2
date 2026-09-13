@@ -23,12 +23,21 @@ public class PacketRouter<T> where T : Session {
         PacketHandler<T>? handler = handlers.GetValueOrDefault(op);
         if (sender is not T session) return;
 
-        // Let another system schedule when to call Handle
-        if (handler?.TryHandleDeferred(session, reader) ?? false) {
+        if (handler is null) {
+            // Opcodes with no handler are dropped. Dump them so unimplemented features
+            // can be identified from what the client actually sends.
+            byte[] payload = reader.ReadBytes(reader.Available);
+            logger.Debug("Unhandled [{OpCode}] {Length} bytes: {Payload}",
+                $"0x{(ushort) op:X4}", payload.Length, payload.ToHexString(payload.Length, ' '));
             return;
         }
 
-        handler?.Handle(session, reader);
+        // Let another system schedule when to call Handle
+        if (handler.TryHandleDeferred(session, reader)) {
+            return;
+        }
+
+        handler.Handle(session, reader);
     }
 
     private void Register(ImmutableDictionary<RecvOp, PacketHandler<T>>.Builder builder, PacketHandler<T> packetHandler) {

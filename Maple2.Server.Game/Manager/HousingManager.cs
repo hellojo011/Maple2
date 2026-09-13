@@ -864,7 +864,7 @@ public class HousingManager {
 
         Vector3 position = Home.CalculateSafePosition(plot.Cubes.Values.ToList());
         foreach (FieldPlayer fieldPlayer in session.Field.Players.Values) {
-            fieldPlayer.Session.Send(PortalPacket.MoveByPortal(fieldPlayer, position, default));
+            fieldPlayer.Session.SendMoveByPortal(PortalPacket.MoveByPortal(fieldPlayer, position, default));
         }
 
         session.Item.Furnishing.SendStorageCount();

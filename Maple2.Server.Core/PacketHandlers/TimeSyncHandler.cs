@@ -11,6 +11,6 @@ public abstract class TimeSyncHandler<T> : PacketHandler<T> where T : Session {
     public override void Handle(T session, IByteReader packet) {
         int key = packet.ReadInt();
 
-        session.Send(TimeSyncPacket.Response(DateTimeOffset.UtcNow, key));
+        session.Send(TimeSyncPacket.Response(DateTimeOffset.Now, key));
     }
 }

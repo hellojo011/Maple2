@@ -26,8 +26,10 @@ public record ScriptConditionMetadata(
 
     public record MaidData(
         bool Authority,
-        bool Expired,
-        bool ReadyToPay,
+        // Key 0 means the script does not check the condition at all; otherwise Value says
+        // whether it must hold. The source encodes this as "1" / "!1" / absent.
+        KeyValuePair<int, bool> Expired,
+        KeyValuePair<int, bool> ReadyToPay,
         int ClosenessRank,
         KeyValuePair<int, bool> ClosenessTime,
         KeyValuePair<int, bool> MoodTime,
